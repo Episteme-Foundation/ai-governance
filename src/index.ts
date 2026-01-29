@@ -17,6 +17,7 @@ import { TrustClassifier } from './orchestration/trust';
 import { RequestRouter } from './orchestration/router';
 import { AgentInvoker } from './orchestration/invoke';
 import { GovernanceServer } from './api/server';
+import { SecretsManager } from './config/secrets';
 
 /**
  * Main entry point for AI Governance application
@@ -24,9 +25,18 @@ import { GovernanceServer } from './api/server';
 async function main() {
   console.log('Starting AI Governance system...');
 
+  // 0. Load secrets from AWS Secrets Manager (with .env fallback)
+  const secretsManager = new SecretsManager();
+
+  const databaseUrl = await secretsManager.getDatabaseUrl();
+  const anthropicApiKey = await secretsManager.getAnthropicApiKey();
+  const openaiApiKey = await secretsManager.getOpenAIApiKey();
+
+  console.log('Secrets loaded successfully');
+
   // 1. Database connection
   const dbPool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: databaseUrl,
   });
 
   console.log('Connected to database');
@@ -38,9 +48,7 @@ async function main() {
   const challengeRepo = new ChallengeRepository(dbPool);
 
   // 3. Services
-  const embeddingProvider = new OpenAIEmbeddingProvider(
-    process.env.OPENAI_API_KEY
-  );
+  const embeddingProvider = new OpenAIEmbeddingProvider(openaiApiKey);
   const embeddingsService = new EmbeddingsService(embeddingProvider);
   const decisionLoader = new DecisionLoader(decisionRepo);
 
@@ -56,7 +64,7 @@ async function main() {
   const router = new RequestRouter();
 
   const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
+    apiKey: anthropicApiKey,
   });
 
   const invoker = new AgentInvoker(
