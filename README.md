@@ -51,12 +51,19 @@ ai-governance/
 ├── README.md                    # This file
 ├── PHILOSOPHY.md                # Core governance principles
 ├── CONSTITUTION.md              # This project's constitution
+├── OPERATIONS.md                # This project's deployment details
 ├── LICENSE                      # MIT License
 │
 ├── docs/
 │   ├── architecture.md          # Technical architecture
 │   ├── decision-log.md          # Decision log format and practices
 │   ├── project-config.md        # Project configuration schema
+│   ├── deployment/              # Deployment guides
+│   │   ├── README.md            # Deployment overview
+│   │   ├── environment-variables.md
+│   │   ├── local-development.md
+│   │   ├── github-codespaces.md
+│   │   └── github-app.md
 │   └── patterns/                # Organizational patterns
 │       ├── README.md            # Pattern index
 │       ├── maintainer.md        # Unified authority pattern
@@ -73,6 +80,13 @@ ai-governance/
 │
 ├── decisions/
 │   └── 0001-adopt-governance.md # Bootstrap decision
+│
+├── infra/                       # AWS infrastructure
+│   ├── README.md                # Infrastructure setup guide
+│   └── cloudformation/          # CloudFormation templates
+│
+├── scripts/                     # Utility scripts
+│   └── validate-github-app.ts   # GitHub App configuration validator
 │
 └── src/                         # Orchestration application
     ├── types/                   # TypeScript type definitions
@@ -180,7 +194,9 @@ The framework doesn't prescribe specific organizational structures. Projects cho
 |----------|---------|
 | `PHILOSOPHY.md` | Core principles — values, governance, organization, identity |
 | `CONSTITUTION.md` | This project's governance structure |
+| `OPERATIONS.md` | This project's deployment and operational details |
 | `docs/architecture.md` | Technical architecture for the orchestration application |
+| `docs/deployment/` | Deployment guides (local, Codespaces, AWS) |
 | `docs/patterns/` | Organizational patterns projects can adopt |
 | `examples/constitution-template.md` | Starting point for project constitutions |
 
@@ -191,9 +207,12 @@ The framework doesn't prescribe specific organizational structures. Projects cho
 - [x] Core philosophy document
 - [x] Architecture design
 - [x] Self-governance constitution
-- [ ] Pattern documentation
-- [ ] Application implementation
-- [ ] GitHub integration
+- [x] Pattern documentation
+- [x] Application implementation (TypeScript orchestration)
+- [x] AWS infrastructure (RDS PostgreSQL with pgvector)
+- [x] Deployment documentation
+- [ ] GitHub App integration (in progress)
+- [ ] End-to-end testing
 
 ---
 
