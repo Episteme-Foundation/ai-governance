@@ -13,6 +13,13 @@ import { loadProjectByRepo } from '../config/load-project';
 /**
  * Fastify server for AI Governance API
  */
+// Extend FastifyRequest to include rawBody
+declare module 'fastify' {
+  interface FastifyRequest {
+    rawBody?: string;
+  }
+}
+
 export class GovernanceServer {
   private app: FastifyInstance;
 
@@ -24,6 +31,22 @@ export class GovernanceServer {
     this.app = Fastify({
       logger: true,
     });
+
+    // Add custom content type parser to capture raw body for webhook signature verification
+    this.app.addContentTypeParser(
+      'application/json',
+      { parseAs: 'string' },
+      (req, body, done) => {
+        try {
+          // Store raw body on request for signature verification
+          (req as unknown as { rawBody: string }).rawBody = body as string;
+          const json = JSON.parse(body as string);
+          done(null, json);
+        } catch (err) {
+          done(err as Error, undefined);
+        }
+      }
+    );
 
     this.setupRoutes();
   }
@@ -80,10 +103,15 @@ export class GovernanceServer {
         return { error: 'Webhook secret not configured' };
       }
 
-      // Get raw body for signature verification
-      // Fastify parses JSON by default, so we need to access the raw body
-      const rawBody = JSON.stringify(request.body);
+      // Get raw body for signature verification (captured by custom content type parser)
+      const rawBody = request.rawBody;
       const signature = request.headers['x-hub-signature-256'] as string | undefined;
+
+      if (!rawBody) {
+        this.app.log.error('Raw body not available for signature verification');
+        reply.status(500);
+        return { error: 'Raw body not available' };
+      }
 
       // Verify webhook signature
       if (!verifyWebhookSignature(rawBody, signature, webhookSecret)) {
