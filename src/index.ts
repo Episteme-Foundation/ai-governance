@@ -17,6 +17,7 @@ import { TrustClassifier } from './orchestration/trust';
 import { RequestRouter } from './orchestration/router';
 import { AgentInvoker } from './orchestration/invoke';
 import { GovernanceServer } from './api/server';
+import { loadSecrets } from './config/load-secrets';
 
 /**
  * Main entry point for AI Governance application
@@ -24,10 +25,14 @@ import { GovernanceServer } from './api/server';
 async function main() {
   console.log('Starting AI Governance system...');
 
-  // Load configuration from environment variables
-  // In GitHub Codespaces: secrets are injected automatically
-  // In AWS deployment: container env vars from Secrets Manager
-  // In local dev: .env file loaded by dotenv
+  // Load secrets from AWS Secrets Manager (if needed)
+  // This handles production deployments where secrets aren't in env vars
+  await loadSecrets();
+
+  // Configuration is now available from environment variables
+  // - Local dev: .env file loaded by dotenv
+  // - GitHub Codespaces: secrets injected automatically
+  // - AWS production: loaded from Secrets Manager above
   const databaseUrl = process.env.DATABASE_URL;
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   const openaiApiKey = process.env.OPENAI_API_KEY;

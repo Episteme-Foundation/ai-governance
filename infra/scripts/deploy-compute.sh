@@ -7,49 +7,15 @@ echo ""
 REGION=${AWS_REGION:-us-east-1}
 STACK_NAME="ai-governance-compute"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-
-# Check if required environment variables are set
-if [ -z "$DATABASE_URL" ]; then
-    echo "Error: DATABASE_URL environment variable is required"
-    exit 1
-fi
-
-if [ -z "$ANTHROPIC_API_KEY" ]; then
-    echo "Error: ANTHROPIC_API_KEY environment variable is required"
-    exit 1
-fi
-
-if [ -z "$OPENAI_API_KEY" ]; then
-    echo "Error: OPENAI_API_KEY environment variable is required"
-    exit 1
-fi
-
-if [ -z "$GITHUB_APP_ID" ]; then
-    echo "Error: GITHUB_APP_ID environment variable is required"
-    exit 1
-fi
-
-if [ -z "$GITHUB_APP_PRIVATE_KEY" ]; then
-    # Try to read from file if path is set
-    if [ -n "$GITHUB_APP_PRIVATE_KEY_PATH" ] && [ -f "$GITHUB_APP_PRIVATE_KEY_PATH" ]; then
-        GITHUB_APP_PRIVATE_KEY=$(cat "$GITHUB_APP_PRIVATE_KEY_PATH")
-    else
-        echo "Error: GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_PATH is required"
-        exit 1
-    fi
-fi
-
-if [ -z "$GITHUB_WEBHOOK_SECRET" ]; then
-    echo "Error: GITHUB_WEBHOOK_SECRET environment variable is required"
-    exit 1
-fi
-
 GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-Episteme-Foundation/ai-governance}
 
 echo "Configuration:"
 echo "  Region: $REGION"
 echo "  Account: $ACCOUNT_ID"
 echo "  Repository: $GITHUB_REPOSITORY"
+echo ""
+echo "Note: Secrets are loaded from AWS Secrets Manager at runtime"
+echo "      Secret name: ai-governance/app-config"
 echo ""
 
 # Step 1: Deploy CloudFormation stack
@@ -58,12 +24,6 @@ aws cloudformation deploy \
     --stack-name $STACK_NAME \
     --template-file cloudformation/compute.yml \
     --parameter-overrides \
-        DatabaseUrl="$DATABASE_URL" \
-        AnthropicApiKey="$ANTHROPIC_API_KEY" \
-        OpenAIApiKey="$OPENAI_API_KEY" \
-        GitHubAppId="$GITHUB_APP_ID" \
-        GitHubAppPrivateKey="$GITHUB_APP_PRIVATE_KEY" \
-        GitHubWebhookSecret="$GITHUB_WEBHOOK_SECRET" \
         GitHubRepository="$GITHUB_REPOSITORY" \
     --capabilities CAPABILITY_NAMED_IAM \
     --region $REGION \

@@ -9,70 +9,16 @@ Parameters:
       - production
       - staging
 
-  # Database connection (from database stack)
-  DatabaseUrl:
-    Type: String
-    NoEcho: true
-    Description: PostgreSQL connection string
-
-  # API Keys
-  AnthropicApiKey:
-    Type: String
-    NoEcho: true
-    Description: Anthropic API key for Claude
-
-  OpenAIApiKey:
-    Type: String
-    NoEcho: true
-    Description: OpenAI API key for embeddings
-
-  # GitHub App
-  GitHubAppId:
-    Type: String
-    Description: GitHub App ID
-
-  GitHubAppPrivateKey:
-    Type: String
-    NoEcho: true
-    Description: GitHub App private key (PEM contents)
-
-  GitHubWebhookSecret:
-    Type: String
-    NoEcho: true
-    Description: GitHub webhook secret
-
   GitHubRepository:
     Type: String
     Default: Episteme-Foundation/ai-governance
     Description: GitHub repository (owner/repo)
 
-Resources:
-  # ECR Repository for container images
-  ECRRepository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: ai-governance
-      ImageScanningConfiguration:
-        ScanOnPush: true
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [
-              {
-                "rulePriority": 1,
-                "description": "Keep last 10 images",
-                "selection": {
-                  "tagStatus": "any",
-                  "countType": "imageCountMoreThan",
-                  "countNumber": 10
-                },
-                "action": {
-                  "type": "expire"
-                }
-              }
-            ]
-          }
+  # Note: ECR repository 'ai-governance' must exist before deploying this stack
+  # Secrets are loaded from AWS Secrets Manager at runtime
+  # Secret name: ai-governance/app-config
 
+Resources:
   # IAM Role for App Runner to access ECR
   AppRunnerAccessRole:
     Type: AWS::IAM::Role
@@ -88,7 +34,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
 
-  # IAM Role for App Runner instance
+  # IAM Role for App Runner instance (needs Secrets Manager access)
   AppRunnerInstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -111,11 +57,18 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: '*'
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ai-governance/*'
 
   # App Runner Service
   AppRunnerService:
     Type: AWS::AppRunner::Service
-    DependsOn: ECRRepository
     Properties:
       ServiceName: ai-governance
       SourceConfiguration:
@@ -132,18 +85,10 @@ Resources:
                 Value: !Ref Environment
               - Name: PORT
                 Value: '3000'
-              - Name: DATABASE_URL
-                Value: !Ref DatabaseUrl
-              - Name: ANTHROPIC_API_KEY
-                Value: !Ref AnthropicApiKey
-              - Name: OPENAI_API_KEY
-                Value: !Ref OpenAIApiKey
-              - Name: GITHUB_APP_ID
-                Value: !Ref GitHubAppId
-              - Name: GITHUB_APP_PRIVATE_KEY
-                Value: !Ref GitHubAppPrivateKey
-              - Name: GITHUB_WEBHOOK_SECRET
-                Value: !Ref GitHubWebhookSecret
+              - Name: AWS_REGION
+                Value: !Ref AWS::Region
+              - Name: AWS_SECRET_NAME
+                Value: ai-governance/app-config
               - Name: GITHUB_REPOSITORY
                 Value: !Ref GitHubRepository
       InstanceConfiguration:
