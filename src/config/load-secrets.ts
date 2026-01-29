@@ -4,15 +4,37 @@ import {
 } from '@aws-sdk/client-secrets-manager';
 
 /**
+ * Normalize GitHub-related env vars from GH_* to GITHUB_* prefix
+ * GitHub Codespaces doesn't allow GITHUB_* prefix, so we use GH_* there
+ */
+function normalizeGitHubEnvVars(): void {
+  const mappings = [
+    ['GH_APP_ID', 'GITHUB_APP_ID'],
+    ['GH_APP_PRIVATE_KEY', 'GITHUB_APP_PRIVATE_KEY'],
+    ['GH_WEBHOOK_SECRET', 'GITHUB_WEBHOOK_SECRET'],
+    ['GH_REPOSITORY', 'GITHUB_REPOSITORY'],
+  ];
+
+  for (const [from, to] of mappings) {
+    if (process.env[from] && !process.env[to]) {
+      process.env[to] = process.env[from];
+    }
+  }
+}
+
+/**
  * Load secrets from AWS Secrets Manager if running in production
  * and env vars are not already set.
  *
  * This allows:
- * - Local dev: Uses .env file directly
- * - Codespaces: Uses GitHub Codespaces secrets (injected as env vars)
+ * - Local dev: Uses .env file directly (GITHUB_* prefix)
+ * - Codespaces: Uses GitHub Codespaces secrets (GH_* prefix, normalized)
  * - AWS production: Fetches from Secrets Manager
  */
 export async function loadSecrets(): Promise<void> {
+  // First, normalize GH_* to GITHUB_* (for Codespaces compatibility)
+  normalizeGitHubEnvVars();
+
   // If all required env vars are already set, skip Secrets Manager
   const requiredVars = [
     'DATABASE_URL',
