@@ -10,8 +10,17 @@ This document contains deployment and operational details specific to this ai-go
 |----------|---------|
 | **Region** | us-east-1 |
 | **Database** | RDS PostgreSQL 15.15 with pgvector |
-| **Stack Name** | ai-governance-database |
+| **Database Stack** | ai-governance-database |
+| **Compute Stack** | ai-governance-compute |
 | **Instance Class** | db.t4g.micro |
+
+### Application Endpoints
+
+| Endpoint | URL |
+|----------|-----|
+| **Service URL** | https://apme7vh4ri.us-east-1.awsapprunner.com |
+| **Health Check** | https://apme7vh4ri.us-east-1.awsapprunner.com/health |
+| **Webhook URL** | https://apme7vh4ri.us-east-1.awsapprunner.com/api/webhooks/github |
 
 ### Database Connection
 
@@ -36,18 +45,23 @@ postgresql://postgres:<password>@<endpoint>:5432/ai_governance?ssl=true&sslmode=
 
 - **Repository:** Episteme-Foundation/ai-governance
 - **Main Branch:** main
-- **GitHub App:** (pending setup)
+- **GitHub App:** ai-governance-app (ID: 2755899)
 
 ## Secrets Management
 
-All secrets are managed via environment variables:
+Secrets are stored in AWS Secrets Manager and loaded at runtime:
 
-| Secret | Local Development | GitHub Codespaces | Production |
-|--------|-------------------|-------------------|------------|
-| DATABASE_URL | `.env` file | Codespaces secret | Container env var |
-| ANTHROPIC_API_KEY | `.env` file | Codespaces secret | Container env var |
-| OPENAI_API_KEY | `.env` file | Codespaces secret | Container env var |
-| GITHUB_APP_* | `.env` file | Codespaces secret | Container env var |
+| Secret Name | Path |
+|-------------|------|
+| **App Config** | `ai-governance/app-config` |
+
+Contains: DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET
+
+| Environment | Secret Source |
+|-------------|---------------|
+| Local Development | `.env` file |
+| GitHub Codespaces | Codespaces secrets |
+| Production (App Runner) | AWS Secrets Manager |
 
 ## Setup Checklist
 
@@ -60,15 +74,18 @@ All secrets are managed via environment variables:
 - [x] Environment variables documented
 - [x] GitHub App documentation created
 - [x] Devcontainer configuration added
+- [x] Anthropic API key obtained and configured
+- [x] OpenAI API key obtained and configured
+- [x] GitHub App created (ai-governance-app, ID: 2755899)
+- [x] AWS Secrets Manager configured
+- [x] App Runner deployed and running
+- [x] CI/CD workflow configured (GitHub Actions)
 
 ### Pending
 
-- [ ] Anthropic API key obtained and configured
-- [ ] OpenAI API key obtained and configured
-- [ ] GitHub App created and installed
-- [ ] GitHub Codespaces enabled with secrets
-- [ ] Initial end-to-end test
-- [ ] Production deployment (App Runner/ECS)
+- [ ] Update GitHub App webhook URL
+- [ ] GitHub Codespaces secrets configured
+- [ ] Initial end-to-end test (webhook → agent)
 
 ## Runbooks
 
@@ -155,7 +172,9 @@ For issues with this deployment:
 
 | Date | Change |
 |------|--------|
-| 2025-01-29 | Initial AWS infrastructure deployed |
-| 2025-01-29 | Database migrations created and run |
-| 2025-01-29 | Simplified secrets to use env vars directly |
-| 2025-01-29 | Documentation restructured |
+| 2026-01-29 | Initial AWS infrastructure deployed |
+| 2026-01-29 | Database migrations created and run |
+| 2026-01-29 | GitHub App created (ai-governance-app) |
+| 2026-01-29 | AWS Secrets Manager integration added |
+| 2026-01-29 | App Runner deployed (apme7vh4ri.us-east-1.awsapprunner.com) |
+| 2026-01-29 | GitHub Actions CI/CD workflow configured |
