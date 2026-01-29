@@ -1,15 +1,15 @@
 export interface Challenge {
   id: string;
   decisionId: string;
-  project: string;
+  projectId: string;
   submittedBy: string;
   submittedAt: string;
   status: 'pending' | 'accepted' | 'rejected' | 'withdrawn';
-  
+
   // Challenge content
   argument: string;
   evidence?: string;
-  
+
   // Response
   respondedBy?: string;
   respondedAt?: string;

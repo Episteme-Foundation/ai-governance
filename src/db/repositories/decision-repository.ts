@@ -134,6 +134,14 @@ export class DecisionRepository extends BaseRepository {
     return result.rows[0].next_number;
   }
 
+  async getRecent(projectId: string, limit: number = 10): Promise<Decision[]> {
+    const result = await this.query(
+      'SELECT * FROM decisions WHERE project_id = $1 ORDER BY date DESC, created_at DESC LIMIT $2',
+      [projectId, limit]
+    );
+    return result.rows.map((row) => this.rowToDecision(row));
+  }
+
   private rowToDecision(row: any): Decision {
     return {
       id: row.id,

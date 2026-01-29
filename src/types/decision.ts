@@ -5,8 +5,8 @@ export interface Decision {
   date: string;
   status: 'adopted' | 'superseded' | 'reversed';
   decisionMaker: string;
-  project: string;
-  
+  projectId: string;
+
   // Content
   decision: string;
   reasoning: string;
@@ -14,7 +14,7 @@ export interface Decision {
   uncertainties?: string;
   reversibility?: string;
   wouldChangeIf?: string;
-  
+
   // Metadata
   embedding?: number[]; // pgvector embedding
   relatedDecisions?: string[];

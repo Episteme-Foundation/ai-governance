@@ -1,7 +1,11 @@
 import { Pool } from 'pg';
 
 export abstract class BaseRepository {
-  constructor(protected pool: Pool) {}
+  protected db: Pool; // Alias for pool
+
+  constructor(protected pool: Pool) {
+    this.db = pool;
+  }
 
   protected async query(text: string, params?: unknown[]) {
     return this.pool.query(text, params);

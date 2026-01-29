@@ -2,31 +2,37 @@ import { RoleDefinition } from './role-definition';
 import { TrustLevel } from './governance-request';
 
 export interface ProjectConfig {
+  // Convenience flat properties for easier access
+  id: string;
+  name: string;
+  repository: string;
+  constitutionPath: string;
+
   project: {
     id: string;
     name: string;
     repository: string;
     constitution: string;
   };
-  
+
   oversight: {
     contacts: Contact[];
     escalation_threshold: EscalationThreshold;
   };
-  
+
   limits: {
     anonymous: RateLimit;
     contributor: RateLimit;
     authorized: RateLimit;
   };
-  
+
   roles: RoleDefinition[];
-  
+
   trust: {
     github_roles: Record<string, TrustLevel>;
     api_keys: ApiKey[];
   };
-  
+
   mcp_servers: McpServerConfig[];
 }
 

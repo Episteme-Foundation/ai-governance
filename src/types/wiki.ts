@@ -9,7 +9,7 @@ export interface WikiPage {
 
 export interface WikiDraft {
   id: string;
-  project: string;
+  projectId: string;
   type: 'new_page' | 'edit_page';
   pagePath: string;
   proposedContent: string;
@@ -42,7 +42,8 @@ export interface WikiPageRef {
 export interface WikiKeyPage {
   title: string;
   path: string;
-  description: string;
+  summary: string;
+  description?: string; // Alias for summary
 }
 
 export interface WikiSearchResult {
