@@ -17,7 +17,6 @@ import { TrustClassifier } from './orchestration/trust';
 import { RequestRouter } from './orchestration/router';
 import { AgentInvoker } from './orchestration/invoke';
 import { GovernanceServer } from './api/server';
-import { SecretsManager } from './config/secrets';
 
 /**
  * Main entry point for AI Governance application
@@ -25,14 +24,25 @@ import { SecretsManager } from './config/secrets';
 async function main() {
   console.log('Starting AI Governance system...');
 
-  // 0. Load secrets from AWS Secrets Manager (with .env fallback)
-  const secretsManager = new SecretsManager();
+  // Load configuration from environment variables
+  // In GitHub Codespaces: secrets are injected automatically
+  // In AWS deployment: container env vars from Secrets Manager
+  // In local dev: .env file loaded by dotenv
+  const databaseUrl = process.env.DATABASE_URL;
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  const openaiApiKey = process.env.OPENAI_API_KEY;
 
-  const databaseUrl = await secretsManager.getDatabaseUrl();
-  const anthropicApiKey = await secretsManager.getAnthropicApiKey();
-  const openaiApiKey = await secretsManager.getOpenAIApiKey();
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL environment variable is required');
+  }
+  if (!anthropicApiKey) {
+    throw new Error('ANTHROPIC_API_KEY environment variable is required');
+  }
+  if (!openaiApiKey) {
+    throw new Error('OPENAI_API_KEY environment variable is required');
+  }
 
-  console.log('Secrets loaded successfully');
+  console.log('Configuration loaded from environment');
 
   // 1. Database connection
   const dbPool = new Pool({
