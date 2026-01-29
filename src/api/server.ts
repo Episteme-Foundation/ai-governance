@@ -65,7 +65,7 @@ export class GovernanceServer {
     });
 
     // GitHub webhook endpoint
-    this.app.post('/webhooks/github', async (request, reply) => {
+    this.app.post('/api/webhooks/github', async (request, reply) => {
       // TODO: Verify GitHub webhook signature
       // TODO: Parse webhook payload
       // TODO: Route to appropriate handler
