@@ -99,12 +99,12 @@ export class PostToolUseHook {
           decisionNumber: await this.decisionRepo.getNextDecisionNumber(
             this.projectId
           ),
-          title: decisionInfo.title,
+          title: decisionInfo.title || `${toolName} execution`,
           date: new Date().toISOString().split('T')[0],
           status: 'adopted',
           decisionMaker: request.source.identity || role.name,
-          decision: decisionInfo.decision,
-          reasoning: decisionInfo.reasoning,
+          decision: decisionInfo.decision || 'Decision details not provided',
+          reasoning: decisionInfo.reasoning || 'Reasoning not provided',
           considerations: decisionInfo.considerations,
           uncertainties: decisionInfo.uncertainties,
           reversibility: decisionInfo.reversibility,

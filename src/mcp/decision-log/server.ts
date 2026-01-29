@@ -284,11 +284,6 @@ export class DecisionLogServer {
     return this.server;
   }
 
-  async start(): Promise<void> {
-    // MCP servers run on stdio
-    await this.server.connect({
-      readableStream: process.stdin,
-      writableStream: process.stdout,
-    });
-  }
+  // TODO: MCP SDK connection API has changed - update when implementing MCP integration
+  // async start(): Promise<void> { ... }
 }

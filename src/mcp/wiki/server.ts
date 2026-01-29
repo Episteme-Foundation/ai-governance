@@ -396,10 +396,6 @@ export class WikiServer {
     return this.server;
   }
 
-  async start(): Promise<void> {
-    await this.server.connect({
-      readableStream: process.stdin,
-      writableStream: process.stdout,
-    });
-  }
+  // TODO: MCP SDK connection API has changed - update when implementing
+  // async start(): Promise<void> { ... }
 }

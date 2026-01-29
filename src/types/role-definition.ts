@@ -7,7 +7,9 @@ export interface ToolPermissions {
 
 export interface Constraint {
   type: string;
-  message: string;
+  description: string;
+  enforcement: 'hard' | 'soft';
+  parameters?: Record<string, unknown>;
   on_actions?: string[];
   paths?: string[];
   without_trust?: TrustLevel;

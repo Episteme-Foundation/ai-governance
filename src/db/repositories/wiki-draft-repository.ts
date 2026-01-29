@@ -8,7 +8,7 @@ export class WikiDraftRepository extends BaseRepository {
   }
 
   async create(draft: Omit<WikiDraft, 'id'>): Promise<WikiDraft> {
-    const id = `${draft.project}-draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const id = `${draft.projectId}-draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     const result = await this.query(
       `INSERT INTO wiki_drafts (
@@ -18,7 +18,7 @@ export class WikiDraftRepository extends BaseRepository {
       RETURNING *`,
       [
         id,
-        draft.project,
+        draft.projectId,
         draft.type,
         draft.pagePath,
         draft.proposedContent,
@@ -102,7 +102,7 @@ export class WikiDraftRepository extends BaseRepository {
   private rowToDraft(row: any): WikiDraft {
     return {
       id: row.id,
-      project: row.project_id,
+      projectId: row.project_id,
       type: row.type,
       pagePath: row.page_path,
       proposedContent: row.proposed_content,

@@ -9,7 +9,7 @@ export class DecisionRepository extends BaseRepository {
 
   async create(decision: Omit<Decision, 'id'>): Promise<Decision> {
     const paddedNumber = decision.decisionNumber.toString().padStart(4, '0');
-    const id = `${decision.project}-${paddedNumber}`;
+    const id = `${decision.projectId}-${paddedNumber}`;
 
     const embeddingStr = decision.embedding
       ? `[${decision.embedding.join(',')}]`
@@ -25,7 +25,7 @@ export class DecisionRepository extends BaseRepository {
       [
         id,
         decision.decisionNumber,
-        decision.project,
+        decision.projectId,
         decision.title,
         decision.date,
         decision.status,
@@ -150,7 +150,7 @@ export class DecisionRepository extends BaseRepository {
       date: row.date,
       status: row.status,
       decisionMaker: row.decision_maker,
-      project: row.project_id,
+      projectId: row.project_id,
       decision: row.decision,
       reasoning: row.reasoning,
       considerations: row.considerations,
