@@ -1,14 +1,14 @@
 project:
   id: ai-governance
   name: AI Governance Framework
-  repository: https://github.com/[org]/ai-governance
+  repository: https://https://github.com/Episteme-Foundation/ai-governance
   constitution: CONSTITUTION.md
 
 oversight:
   contacts:
-    - name: Project Steward
-      email: steward@example.com
-      github: [github-username]
+    - name: Jackson Hurley
+      email: jacksonwhurley@gmail.com
+      github: jacksonqueenking
   escalation_threshold:
     overturned_challenges: true
     constitutional_amendments: true

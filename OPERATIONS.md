@@ -65,7 +65,7 @@ Contains: DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, GITHUB_APP_ID, GITHUB
 
 ## Setup Checklist
 
-### Completed
+All initial setup is complete:
 
 - [x] AWS account configured
 - [x] RDS PostgreSQL deployed with pgvector
@@ -80,12 +80,9 @@ Contains: DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, GITHUB_APP_ID, GITHUB
 - [x] AWS Secrets Manager configured
 - [x] App Runner deployed and running
 - [x] CI/CD workflow configured (GitHub Actions)
-
-### Pending
-
-- [ ] Update GitHub App webhook URL
-- [ ] GitHub Codespaces secrets configured
-- [ ] Initial end-to-end test (webhook → agent)
+- [x] GitHub App webhook URL configured
+- [x] GitHub Codespaces secrets configured
+- [x] Webhook integration verified (200 responses)
 
 ## Runbooks
 
@@ -137,8 +134,12 @@ psql "$DATABASE_URL" -c "SELECT version();"
 ```bash
 # Local: output goes to stdout
 
-# AWS CloudWatch (once deployed):
-aws logs tail /aws/apprunner/ai-governance --follow
+# AWS CloudWatch:
+# First, find the log group (includes service ID):
+aws logs describe-log-groups --log-group-name-prefix /aws/apprunner/ai-governance
+
+# Then tail the application logs:
+aws logs tail "/aws/apprunner/ai-governance/<service-id>/application" --follow --region us-east-1
 ```
 
 ## Cost Tracking
@@ -178,3 +179,5 @@ For issues with this deployment:
 | 2026-01-29 | AWS Secrets Manager integration added |
 | 2026-01-29 | App Runner deployed (apme7vh4ri.us-east-1.awsapprunner.com) |
 | 2026-01-29 | GitHub Actions CI/CD workflow configured |
+| 2026-01-29 | GitHub Codespaces secrets configured (GH_* prefix) |
+| 2026-01-29 | Webhook integration verified and working |

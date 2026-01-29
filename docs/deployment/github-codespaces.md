@@ -35,12 +35,13 @@ Codespaces secrets are injected as environment variables when a Codespace launch
 | `DATABASE_URL` | PostgreSQL connection string (from AWS RDS) |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `OPENAI_API_KEY` | OpenAI API key |
-| `GITHUB_APP_ID` | GitHub App ID |
-| `GITHUB_APP_PRIVATE_KEY` | Full PEM contents of private key |
-| `GITHUB_WEBHOOK_SECRET` | Webhook secret |
-| `GITHUB_REPOSITORY` | This repository (owner/repo) |
+| `GH_APP_ID` | GitHub App ID |
+| `GH_APP_PRIVATE_KEY` | Full PEM contents of private key |
+| `GH_WEBHOOK_SECRET` | Webhook secret |
 
-**Important:** For `GITHUB_APP_PRIVATE_KEY`, paste the entire contents of the `.pem` file including the `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines.
+**Important:** GitHub reserves the `GITHUB_*` prefix for its own variables, so use `GH_*` for GitHub App secrets. The application automatically normalizes these at runtime (maps `GH_*` → `GITHUB_*`).
+
+**For private key:** Paste the entire contents of the `.pem` file including the `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines.
 
 ## Step 3: Create devcontainer.json
 

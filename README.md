@@ -209,10 +209,11 @@ The framework doesn't prescribe specific organizational structures. Projects cho
 - [x] Self-governance constitution
 - [x] Pattern documentation
 - [x] Application implementation (TypeScript orchestration)
-- [x] AWS infrastructure (RDS PostgreSQL with pgvector)
+- [x] AWS infrastructure (RDS PostgreSQL with pgvector, App Runner)
 - [x] Deployment documentation
-- [ ] GitHub App integration (in progress)
-- [ ] End-to-end testing
+- [x] GitHub App integration (webhook receiving events)
+- [x] CI/CD pipeline (GitHub Actions → App Runner)
+- [ ] Full agent loop implementation (in progress)
 
 ---
 

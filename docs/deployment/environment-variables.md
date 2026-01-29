@@ -190,10 +190,11 @@ Add secrets in repository Settings → Secrets and variables → Codespaces:
 | `DATABASE_URL` | Your RDS connection string |
 | `ANTHROPIC_API_KEY` | Your Anthropic API key |
 | `OPENAI_API_KEY` | Your OpenAI API key |
-| `GITHUB_APP_ID` | Your GitHub App ID |
-| `GITHUB_APP_PRIVATE_KEY` | Full PEM contents |
-| `GITHUB_WEBHOOK_SECRET` | Your webhook secret |
-| `GITHUB_REPOSITORY` | owner/repo |
+| `GH_APP_ID` | Your GitHub App ID |
+| `GH_APP_PRIVATE_KEY` | Full PEM contents |
+| `GH_WEBHOOK_SECRET` | Your webhook secret |
+
+**Important:** GitHub reserves the `GITHUB_*` prefix for its own variables in Codespaces. Use `GH_*` instead—the application automatically normalizes these to `GITHUB_*` at runtime.
 
 Codespaces automatically injects these as environment variables.
 

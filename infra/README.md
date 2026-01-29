@@ -103,9 +103,10 @@ In your GitHub repository settings, add these secrets:
 - ElastiCache Redis for rate limiting
 - **Cost:** ~$12/month (cache.t4g.micro)
 
-### compute.yml (TODO)
-- App Runner or ECS Fargate for application
-- Auto-scaling, blue/green deployment
+### compute.yml
+- App Runner for containerized application
+- IAM roles for ECR access and Secrets Manager
+- Health checks and auto-scaling
 - **Cost:** ~$10-30/month (minimal traffic)
 
 ## Security Considerations
