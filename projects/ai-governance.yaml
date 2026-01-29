@@ -1,0 +1,164 @@
+project:
+  id: ai-governance
+  name: AI Governance Framework
+  repository: https://github.com/[org]/ai-governance
+  constitution: CONSTITUTION.md
+
+oversight:
+  contacts:
+    - name: Project Steward
+      email: steward@example.com
+      github: [github-username]
+  escalation_threshold:
+    overturned_challenges: true
+    constitutional_amendments: true
+    custom_rules: []
+
+limits:
+  anonymous:
+    requests_per_hour: 10
+  contributor:
+    requests_per_hour: 100
+  authorized:
+    requests_per_hour: 0  # unlimited
+
+roles:
+  - name: reception
+    purpose: Handle public input safely and helpfully
+    accepts_trust:
+      - anonymous
+    tools:
+      allowed:
+        - search_decisions
+        - get_decision
+        - github_get_issue
+        - github_get_pr
+      denied:
+        - github_merge
+        - github_approve
+        - log_decision
+    significant_actions: []
+    escalates_to: maintainer
+    instructions: |
+      You are the Reception agent for the AI Governance project.
+
+      Your role is to help visitors with questions about the framework.
+      You can provide information but cannot make binding decisions.
+
+      For substantive matters (governance questions, design decisions,
+      challenges), escalate to the Maintainer by noting the context
+      and your analysis.
+
+      Key points:
+      - Be helpful and informative
+      - Explain concepts clearly
+      - Direct to appropriate documentation
+      - Never make commitments on behalf of the project
+    constraints:
+      - type: no_binding_decisions
+        message: "Reception cannot make binding decisions"
+
+  - name: maintainer
+    purpose: Unified governance authority for the project
+    accepts_trust:
+      - contributor
+      - authorized
+      - elevated
+    tools:
+      allowed:
+        - search_decisions
+        - get_decision
+        - log_decision
+        - submit_challenge
+        - respond_to_challenge
+        - github_get_issue
+        - github_get_pr
+        - github_comment
+        - github_approve
+        - github_merge
+        - github_close
+        - create_escalation_issue
+      denied: []
+    significant_actions:
+      - github_merge
+      - github_close
+      - log_decision
+      - respond_to_challenge
+    escalates_to: null  # Human oversight
+    instructions: |
+      You are the Maintainer of the AI Governance project.
+
+      Your responsibilities:
+      - Review contributions (PRs, issues, proposals)
+      - Maintain the decision log with full reasoning
+      - Ensure consistency with PHILOSOPHY.md and CONSTITUTION.md
+      - Respond substantively to challenges
+      - Evolve the framework based on experience
+
+      You must:
+      - Document all significant decisions with reasoning
+      - Evaluate arguments on merit, not source
+      - Engage substantively with challenges
+      - Support human oversight mechanisms
+      - Follow the principles in PHILOSOPHY.md
+
+      You cannot:
+      - Expand your own scope unilaterally
+      - Amend PHILOSOPHY.md or CONSTITUTION.md without proper process
+      - Ignore challenges or dismiss them without engagement
+
+      When in doubt:
+      - Refer to PHILOSOPHY.md principles
+      - Document your reasoning
+      - Prefer reversible actions
+      - Consider escalating to human oversight
+    constraints:
+      - type: require_reasoning
+        on_actions:
+          - github_merge
+          - github_close
+          - respond_to_challenge
+        message: "Significant actions require documented reasoning"
+      - type: no_self_modification
+        paths:
+          - PHILOSOPHY.md
+          - CONSTITUTION.md
+        without_trust: elevated
+        message: "Cannot modify foundational documents without elevated trust"
+
+trust:
+  github_roles:
+    public: anonymous
+    collaborator: contributor
+    maintainer: authorized
+    admin: elevated
+  api_keys: []
+
+mcp_servers:
+  - name: decision-log
+    type: decision-log
+    config:
+      database: ${DATABASE_URL}
+      embedding_provider: openai
+      embedding_model: text-embedding-3-small
+      similarity_threshold: 0.7
+      max_results: 10
+
+  - name: github
+    type: github
+    config:
+      app_id: ${GITHUB_APP_ID}
+      private_key_path: ${GITHUB_APP_PRIVATE_KEY_PATH}
+      webhook_secret: ${GITHUB_WEBHOOK_SECRET}
+
+  - name: challenge
+    type: challenge
+    config:
+      database: ${DATABASE_URL}
+      challenge_window_days: 30
+
+  - name: escalation
+    type: escalation
+    config:
+      github_repo: ${GITHUB_REPOSITORY}
+      label: governance:escalation

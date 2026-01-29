@@ -1,0 +1,51 @@
+{
+  "name": "AI Governance Development",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-20-bullseye",
+
+  "features": {
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-docker",
+        "amazonwebservices.aws-toolkit-vscode",
+        "ckolkman.vscode-postgres",
+        "GitHub.copilot"
+      ],
+      "settings": {
+        "typescript.tsdk": "node_modules/typescript/lib",
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "[typescript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        }
+      }
+    }
+  },
+
+  "forwardPorts": [3000, 5432, 6379],
+
+  "postCreateCommand": "npm install && npm run build",
+
+  "remoteEnv": {
+    "DATABASE_URL": "${localEnv:DATABASE_URL}",
+    "REDIS_URL": "${localEnv:REDIS_URL}",
+    "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}",
+    "GITHUB_APP_ID": "${localEnv:GITHUB_APP_ID}",
+    "GITHUB_APP_PRIVATE_KEY_PATH": "${localEnv:GITHUB_APP_PRIVATE_KEY_PATH}",
+    "GITHUB_WEBHOOK_SECRET": "${localEnv:GITHUB_WEBHOOK_SECRET}",
+    "AWS_REGION": "${localEnv:AWS_REGION}",
+    "NODE_ENV": "development"
+  },
+
+  "containerEnv": {
+    "TZ": "UTC"
+  },
+
+  "remoteUser": "node"
+}
