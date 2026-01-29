@@ -3,6 +3,12 @@ import { GovernanceRequest } from '../types';
 import { TrustClassifier } from '../orchestration/trust';
 import { RequestRouter } from '../orchestration/router';
 import { AgentInvoker } from '../orchestration/invoke';
+import {
+  verifyWebhookSignature,
+  parseWebhookEvent,
+  handleWebhookEvent,
+} from './webhooks';
+import { loadProjectByRepo } from '../config/load-project';
 
 /**
  * Fastify server for AI Governance API
@@ -66,11 +72,117 @@ export class GovernanceServer {
 
     // GitHub webhook endpoint
     this.app.post('/api/webhooks/github', async (request, reply) => {
-      // TODO: Verify GitHub webhook signature
-      // TODO: Parse webhook payload
-      // TODO: Route to appropriate handler
+      const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
 
-      return { status: 'received' };
+      if (!webhookSecret) {
+        this.app.log.error('GITHUB_WEBHOOK_SECRET not configured');
+        reply.status(500);
+        return { error: 'Webhook secret not configured' };
+      }
+
+      // Get raw body for signature verification
+      // Fastify parses JSON by default, so we need to access the raw body
+      const rawBody = JSON.stringify(request.body);
+      const signature = request.headers['x-hub-signature-256'] as string | undefined;
+
+      // Verify webhook signature
+      if (!verifyWebhookSignature(rawBody, signature, webhookSecret)) {
+        this.app.log.warn('Invalid webhook signature');
+        reply.status(401);
+        return { error: 'Invalid signature' };
+      }
+
+      // Parse the webhook event
+      const headers: Record<string, string | undefined> = {
+        'x-github-event': request.headers['x-github-event'] as string,
+        'x-github-delivery': request.headers['x-github-delivery'] as string,
+      };
+      const event = parseWebhookEvent(headers, request.body as Record<string, unknown>);
+
+      this.app.log.info({
+        event: event.event,
+        action: event.action,
+        sender: event.sender,
+        repo: `${event.owner}/${event.repo}`,
+        deliveryId: event.deliveryId,
+      }, 'Received GitHub webhook');
+
+      // Determine project ID from repository
+      const projectId = `${event.owner}/${event.repo}`;
+
+      // Route the event to appropriate handler
+      const result = handleWebhookEvent(event, projectId);
+
+      if (!result.shouldProcess) {
+        this.app.log.info({ reason: result.skipReason }, 'Skipping webhook event');
+        return {
+          status: 'skipped',
+          reason: result.skipReason,
+        };
+      }
+
+      // We have a governance request to process
+      const governanceRequest = result.request!;
+
+      // Refine trust level using classifier (async for GitHub API lookup)
+      governanceRequest.trust = await this.trustClassifier.classifyAsync(governanceRequest);
+
+      this.app.log.info({
+        requestId: governanceRequest.id,
+        intent: governanceRequest.intent,
+        trust: governanceRequest.trust,
+      }, 'Processing governance request');
+
+      // Load project configuration
+      const projectConfig = await loadProjectByRepo(projectId);
+
+      if (!projectConfig) {
+        this.app.log.warn({ projectId }, 'No project configuration found');
+        return {
+          status: 'skipped',
+          request_id: governanceRequest.id,
+          reason: 'No project configuration found for this repository',
+        };
+      }
+
+      // Route request to appropriate role
+      const role = this.router.route(governanceRequest, projectConfig);
+
+      this.app.log.info({
+        requestId: governanceRequest.id,
+        role: role.name,
+      }, 'Routed to role');
+
+      // Invoke the agent
+      try {
+        const response = await this.invoker.invoke(governanceRequest, role, projectConfig);
+
+        this.app.log.info({
+          requestId: governanceRequest.id,
+          responseLength: response.length,
+        }, 'Agent completed');
+
+        return {
+          status: 'completed',
+          request_id: governanceRequest.id,
+          trust_level: governanceRequest.trust,
+          intent: governanceRequest.intent,
+          project: projectId,
+          role: role.name,
+          response,
+        };
+      } catch (error) {
+        this.app.log.error({
+          requestId: governanceRequest.id,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        }, 'Agent invocation failed');
+
+        return {
+          status: 'error',
+          request_id: governanceRequest.id,
+          error: error instanceof Error ? error.message : 'Agent invocation failed',
+        };
+      }
     });
 
     // Admin endpoint (requires authentication)

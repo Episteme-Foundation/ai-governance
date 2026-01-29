@@ -213,6 +213,124 @@ export class ChallengeServer {
     return this.server;
   }
 
-  // TODO: MCP SDK connection API has changed - update when implementing
-  // async start(): Promise<void> { ... }
+  /**
+   * Get tool definitions for use in agent invocation
+   */
+  getToolDefinitions(): Anthropic.Tool[] {
+    return [
+      {
+        name: 'submit_challenge',
+        description:
+          'Challenge a governance decision. Available to all trust levels.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            decision_id: {
+              type: 'string',
+              description: 'ID of decision being challenged',
+            },
+            project_id: {
+              type: 'string',
+              description: 'Project ID',
+            },
+            submitted_by: {
+              type: 'string',
+              description: 'Who is submitting the challenge',
+            },
+            argument: {
+              type: 'string',
+              description: 'Argument for why the decision should be reconsidered',
+            },
+            evidence: {
+              type: 'string',
+              description: 'Supporting evidence (optional)',
+            },
+          },
+          required: [
+            'decision_id',
+            'project_id',
+            'submitted_by',
+            'argument',
+          ],
+        },
+      },
+      {
+        name: 'list_challenges',
+        description: 'List pending challenges',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            project_id: {
+              type: 'string',
+              description: 'Project ID',
+            },
+            status: {
+              type: 'string',
+              enum: ['pending', 'accepted', 'rejected', 'withdrawn'],
+              description: 'Filter by status (optional)',
+            },
+          },
+          required: ['project_id'],
+        },
+      },
+      {
+        name: 'respond_to_challenge',
+        description:
+          'Respond to a challenge. (Authorized trust level required)',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            challenge_id: {
+              type: 'string',
+              description: 'Challenge ID',
+            },
+            responded_by: {
+              type: 'string',
+              description: 'Who is responding',
+            },
+            response: {
+              type: 'string',
+              description: 'Response to the challenge',
+            },
+            outcome: {
+              type: 'string',
+              enum: ['accepted', 'rejected'],
+              description: 'Whether the challenge is accepted or rejected',
+            },
+          },
+          required: [
+            'challenge_id',
+            'responded_by',
+            'response',
+            'outcome',
+          ],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Execute a tool directly (for use by orchestration layer)
+   */
+  async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    switch (name) {
+      case 'submit_challenge': {
+        const result = await this.handleSubmitChallenge(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      case 'list_challenges': {
+        const result = await this.handleListChallenges(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      case 'respond_to_challenge': {
+        const result = await this.handleRespondToChallenge(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      default:
+        throw new Error(`Unknown tool: ${name}`);
+    }
+  }
 }
+
+// Import Anthropic types
+import Anthropic from '@anthropic-ai/sdk';

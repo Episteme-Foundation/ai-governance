@@ -396,6 +396,143 @@ export class WikiServer {
     return this.server;
   }
 
-  // TODO: MCP SDK connection API has changed - update when implementing
-  // async start(): Promise<void> { ... }
+  /**
+   * Get tool definitions for use in agent invocation
+   */
+  getToolDefinitions(): Anthropic.Tool[] {
+    return [
+      {
+        name: 'wiki_search',
+        description: 'Search wiki pages for content',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            project_id: { type: 'string', description: 'Project ID' },
+            query: { type: 'string', description: 'Search query' },
+          },
+          required: ['project_id', 'query'],
+        },
+      },
+      {
+        name: 'wiki_get_page',
+        description: 'Get a specific wiki page by path',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            project_id: { type: 'string', description: 'Project ID' },
+            page_path: { type: 'string', description: 'Path to wiki page' },
+          },
+          required: ['project_id', 'page_path'],
+        },
+      },
+      {
+        name: 'wiki_propose_edit',
+        description: 'Propose an edit to an existing wiki page. Requires curator approval.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            project_id: { type: 'string', description: 'Project ID' },
+            page_path: { type: 'string', description: 'Path to page being edited' },
+            proposed_content: { type: 'string', description: 'New content for the page' },
+            edit_summary: { type: 'string', description: 'Summary of what changed and why' },
+            proposed_by: { type: 'string', description: 'Who is proposing this edit' },
+          },
+          required: ['project_id', 'page_path', 'proposed_content', 'edit_summary', 'proposed_by'],
+        },
+      },
+      {
+        name: 'wiki_propose_page',
+        description: 'Propose a new wiki page. Requires curator approval.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            project_id: { type: 'string', description: 'Project ID' },
+            page_path: { type: 'string', description: 'Path for new page' },
+            proposed_content: { type: 'string', description: 'Content for the new page' },
+            edit_summary: { type: 'string', description: 'Why this page is being created' },
+            proposed_by: { type: 'string', description: 'Who is proposing this page' },
+          },
+          required: ['project_id', 'page_path', 'proposed_content', 'edit_summary', 'proposed_by'],
+        },
+      },
+      {
+        name: 'wiki_review_drafts',
+        description: 'List pending wiki draft edits awaiting curator review. (Curator only)',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            project_id: { type: 'string', description: 'Project ID' },
+          },
+          required: ['project_id'],
+        },
+      },
+      {
+        name: 'wiki_approve_draft',
+        description: 'Approve a wiki draft and publish it. (Curator only)',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            draft_id: { type: 'string', description: 'Draft ID to approve' },
+            reviewed_by: { type: 'string', description: 'Curator approving the draft' },
+            feedback: { type: 'string', description: 'Optional feedback for the contributor' },
+          },
+          required: ['draft_id', 'reviewed_by'],
+        },
+      },
+      {
+        name: 'wiki_reject_draft',
+        description: 'Reject a wiki draft with feedback. (Curator only)',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            draft_id: { type: 'string', description: 'Draft ID to reject' },
+            reviewed_by: { type: 'string', description: 'Curator rejecting the draft' },
+            feedback: { type: 'string', description: 'Feedback explaining why it was rejected' },
+          },
+          required: ['draft_id', 'reviewed_by', 'feedback'],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Execute a tool directly (for use by orchestration layer)
+   */
+  async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    switch (name) {
+      case 'wiki_search': {
+        const result = await this.handleWikiSearch(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      case 'wiki_get_page': {
+        const result = await this.handleWikiGetPage(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      case 'wiki_propose_edit': {
+        const result = await this.handleWikiProposeEdit(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      case 'wiki_propose_page': {
+        const result = await this.handleWikiProposePage(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      case 'wiki_review_drafts': {
+        const result = await this.handleWikiReviewDrafts(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      case 'wiki_approve_draft': {
+        const result = await this.handleWikiApproveDraft(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      case 'wiki_reject_draft': {
+        const result = await this.handleWikiRejectDraft(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      default:
+        throw new Error(`Unknown tool: ${name}`);
+    }
+  }
 }
+
+// Import Anthropic types
+import Anthropic from '@anthropic-ai/sdk';

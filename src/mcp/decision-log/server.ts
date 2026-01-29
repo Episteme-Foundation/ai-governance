@@ -284,6 +284,127 @@ export class DecisionLogServer {
     return this.server;
   }
 
-  // TODO: MCP SDK connection API has changed - update when implementing MCP integration
-  // async start(): Promise<void> { ... }
+  /**
+   * Get tool definitions for use in agent invocation
+   */
+  getToolDefinitions(): Anthropic.Tool[] {
+    return [
+      {
+        name: 'search_decisions',
+        description:
+          'Search for decisions semantically similar to a query. Returns relevant past decisions that may provide precedent.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            project_id: {
+              type: 'string',
+              description: 'Project ID to search within',
+            },
+            query: {
+              type: 'string',
+              description: 'Search query describing what you are looking for',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum number of results (default: 5)',
+            },
+          },
+          required: ['project_id', 'query'],
+        },
+      },
+      {
+        name: 'get_decision',
+        description: 'Get a specific decision by ID',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            decision_id: {
+              type: 'string',
+              description: 'Decision ID',
+            },
+          },
+          required: ['decision_id'],
+        },
+      },
+      {
+        name: 'log_decision',
+        description:
+          'Log a new governance decision. Should be used for all significant actions that require documented reasoning.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            project_id: {
+              type: 'string',
+              description: 'Project ID',
+            },
+            title: {
+              type: 'string',
+              description: 'Brief title of the decision',
+            },
+            decision: {
+              type: 'string',
+              description: 'What was decided',
+            },
+            reasoning: {
+              type: 'string',
+              description: 'Why this decision was made',
+            },
+            considerations: {
+              type: 'string',
+              description: 'What factors were considered (optional)',
+            },
+            uncertainties: {
+              type: 'string',
+              description: 'What uncertainties remain (optional)',
+            },
+            reversibility: {
+              type: 'string',
+              description: 'How easily this can be reversed (optional)',
+            },
+            would_change_if: {
+              type: 'string',
+              description:
+                'What conditions would lead to changing this decision (optional)',
+            },
+            decision_maker: {
+              type: 'string',
+              description: 'Who made this decision',
+            },
+          },
+          required: [
+            'project_id',
+            'title',
+            'decision',
+            'reasoning',
+            'decision_maker',
+          ],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Execute a tool directly (for use by orchestration layer)
+   */
+  async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    switch (name) {
+      case 'search_decisions': {
+        const result = await this.handleSearchDecisions(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      case 'get_decision': {
+        const result = await this.handleGetDecision(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      case 'log_decision': {
+        const result = await this.handleLogDecision(args);
+        return JSON.parse((result.content[0] as { text: string }).text);
+      }
+      default:
+        throw new Error(`Unknown tool: ${name}`);
+    }
+  }
 }
+
+// Import Anthropic types
+import Anthropic from '@anthropic-ai/sdk';

@@ -6,8 +6,9 @@ import {
   SessionRepository,
   AuditRepository,
   ChallengeRepository,
+  WikiDraftRepository,
 } from './db/repositories';
-import { DecisionLoader } from './context/loaders';
+import { DecisionLoader, WikiLoader } from './context/loaders';
 import {
   EmbeddingsService,
   OpenAIEmbeddingProvider,
@@ -16,8 +17,13 @@ import { SystemPromptBuilder } from './context/prompt-builder';
 import { TrustClassifier } from './orchestration/trust';
 import { RequestRouter } from './orchestration/router';
 import { AgentInvoker } from './orchestration/invoke';
+import { MCPExecutor } from './orchestration/mcp-executor';
 import { GovernanceServer } from './api/server';
 import { loadSecrets } from './config/load-secrets';
+import { GitHubServer } from './mcp/github/server';
+import { DecisionLogServer } from './mcp/decision-log/server';
+import { ChallengeServer } from './mcp/challenge/server';
+import { WikiServer } from './mcp/wiki/server';
 
 /**
  * Main entry point for AI Governance application
@@ -61,6 +67,7 @@ async function main() {
   const sessionRepo = new SessionRepository(dbPool);
   const auditRepo = new AuditRepository(dbPool);
   const challengeRepo = new ChallengeRepository(dbPool);
+  const wikiDraftRepo = new WikiDraftRepository(dbPool);
 
   // 3. Services
   const embeddingProvider = new OpenAIEmbeddingProvider(openaiApiKey);
@@ -74,7 +81,21 @@ async function main() {
     process.cwd()
   );
 
-  // 5. Orchestration
+  // 5. MCP Servers
+  const githubServer = new GitHubServer();
+  const decisionLogServer = new DecisionLogServer(decisionRepo, embeddingsService);
+  const challengeServer = new ChallengeServer(challengeRepo);
+  const wikiServer = new WikiServer(wikiDraftRepo, WikiLoader);
+
+  // 6. MCP Executor (routes tool calls to appropriate server)
+  const mcpExecutor = new MCPExecutor(
+    githubServer,
+    decisionLogServer,
+    challengeServer,
+    wikiServer
+  );
+
+  // 7. Orchestration
   const trustClassifier = new TrustClassifier();
   const router = new RequestRouter();
 
@@ -88,7 +109,8 @@ async function main() {
     sessionRepo,
     auditRepo,
     decisionRepo,
-    embeddingsService
+    embeddingsService,
+    mcpExecutor
   );
 
   // 6. API Server
