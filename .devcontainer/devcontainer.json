@@ -4,7 +4,8 @@
 
   "features": {
     "ghcr.io/devcontainers/features/aws-cli:1": {},
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
 
   "customizations": {
@@ -35,10 +36,13 @@
   "remoteEnv": {
     "DATABASE_URL": "${localEnv:DATABASE_URL}",
     "REDIS_URL": "${localEnv:REDIS_URL}",
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
     "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}",
     "GITHUB_APP_ID": "${localEnv:GITHUB_APP_ID}",
+    "GITHUB_APP_PRIVATE_KEY": "${localEnv:GITHUB_APP_PRIVATE_KEY}",
     "GITHUB_APP_PRIVATE_KEY_PATH": "${localEnv:GITHUB_APP_PRIVATE_KEY_PATH}",
     "GITHUB_WEBHOOK_SECRET": "${localEnv:GITHUB_WEBHOOK_SECRET}",
+    "GITHUB_REPOSITORY": "${localEnv:GITHUB_REPOSITORY}",
     "AWS_REGION": "${localEnv:AWS_REGION}",
     "NODE_ENV": "development"
   },
