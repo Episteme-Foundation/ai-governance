@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AI Governance - Compute Infrastructure (App Runner)'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+
+  # Database connection (from database stack)
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Description: PostgreSQL connection string
+
+  # API Keys
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+    Description: Anthropic API key for Claude
+
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAI API key for embeddings
+
+  # GitHub App
+  GitHubAppId:
+    Type: String
+    Description: GitHub App ID
+
+  GitHubAppPrivateKey:
+    Type: String
+    NoEcho: true
+    Description: GitHub App private key (PEM contents)
+
+  GitHubWebhookSecret:
+    Type: String
+    NoEcho: true
+    Description: GitHub webhook secret
+
+  GitHubRepository:
+    Type: String
+    Default: Episteme-Foundation/ai-governance
+    Description: GitHub repository (owner/repo)
+
+Resources:
+  # ECR Repository for container images
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: ai-governance
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  # IAM Role for App Runner to access ECR
+  AppRunnerAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ai-governance-apprunner-access
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: build.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  # IAM Role for App Runner instance
+  AppRunnerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ai-governance-apprunner-instance
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: tasks.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # App Runner Service
+  AppRunnerService:
+    Type: AWS::AppRunner::Service
+    DependsOn: ECRRepository
+    Properties:
+      ServiceName: ai-governance
+      SourceConfiguration:
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt AppRunnerAccessRole.Arn
+        AutoDeploymentsEnabled: false
+        ImageRepository:
+          ImageIdentifier: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/ai-governance:latest'
+          ImageRepositoryType: ECR
+          ImageConfiguration:
+            Port: '3000'
+            RuntimeEnvironmentVariables:
+              - Name: NODE_ENV
+                Value: !Ref Environment
+              - Name: PORT
+                Value: '3000'
+              - Name: DATABASE_URL
+                Value: !Ref DatabaseUrl
+              - Name: ANTHROPIC_API_KEY
+                Value: !Ref AnthropicApiKey
+              - Name: OPENAI_API_KEY
+                Value: !Ref OpenAIApiKey
+              - Name: GITHUB_APP_ID
+                Value: !Ref GitHubAppId
+              - Name: GITHUB_APP_PRIVATE_KEY
+                Value: !Ref GitHubAppPrivateKey
+              - Name: GITHUB_WEBHOOK_SECRET
+                Value: !Ref GitHubWebhookSecret
+              - Name: GITHUB_REPOSITORY
+                Value: !Ref GitHubRepository
+      InstanceConfiguration:
+        Cpu: '1024'
+        Memory: '2048'
+        InstanceRoleArn: !GetAtt AppRunnerInstanceRole.Arn
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /health
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+
+Outputs:
+  ServiceUrl:
+    Description: App Runner service URL
+    Value: !Sub 'https://${AppRunnerService.ServiceUrl}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceUrl'
+
+  WebhookUrl:
+    Description: GitHub webhook URL (update in GitHub App settings)
+    Value: !Sub 'https://${AppRunnerService.ServiceUrl}/api/webhooks/github'
+
+  ECRRepositoryUri:
+    Description: ECR repository URI for pushing images
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/ai-governance'
+    Export:
+      Name: !Sub '${AWS::StackName}-ECRRepositoryUri'
