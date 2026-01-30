@@ -1,7 +1,7 @@
 project:
   id: ai-governance
   name: AI Governance Framework
-  repository: https://https://github.com/Episteme-Foundation/ai-governance
+  repository: https://github.com/Episteme-Foundation/ai-governance
   constitution: CONSTITUTION.md
 
 oversight:
