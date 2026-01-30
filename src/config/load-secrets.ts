@@ -82,6 +82,10 @@ export async function loadSecrets(): Promise<void> {
       GITHUB_APP_PRIVATE_KEY: secrets.GITHUB_APP_PRIVATE_KEY,
       GITHUB_WEBHOOK_SECRET: secrets.GITHUB_WEBHOOK_SECRET,
       GITHUB_REPOSITORY: secrets.GITHUB_REPOSITORY,
+      // Langfuse observability (optional)
+      LANGFUSE_SECRET_KEY: secrets.LANGFUSE_SECRET_KEY,
+      LANGFUSE_PUBLIC_KEY: secrets.LANGFUSE_PUBLIC_KEY,
+      LANGFUSE_BASE_URL: secrets.LANGFUSE_BASE_URL,
     };
 
     for (const [key, value] of Object.entries(secretMappings)) {
