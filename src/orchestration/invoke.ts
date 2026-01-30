@@ -117,11 +117,30 @@ export class AgentInvoker {
     console.log(`[Agent] Tools available for role ${role.name}:`, tools.map(t => t.name));
     console.log(`[Agent] Role allowed tools:`, role.tools.allowed);
 
-    // 5. Build initial messages
+    // 5. Build initial messages with context from the request
+    // Extract key context from payload for tool usage
+    const payload = request.payload || {};
+    const owner = payload.owner as string || '';
+    const repo = payload.repo as string || '';
+    const pullRequest = payload.pull_request as Record<string, unknown> | undefined;
+    const issue = payload.issue as Record<string, unknown> | undefined;
+    const prNumber = pullRequest?.number;
+    const issueNumber = issue?.number;
+
+    let userMessage = request.intent;
+    if (owner && repo) {
+      userMessage += `\n\nContext for GitHub API calls:\n- Owner: ${owner}\n- Repo: ${repo}`;
+      if (prNumber) userMessage += `\n- PR Number: ${prNumber}`;
+      if (issueNumber && !prNumber) userMessage += `\n- Issue Number: ${issueNumber}`;
+      userMessage += `\n\nUse these values when calling GitHub tools (github_get_pr, github_comment, etc).`;
+    }
+
+    console.log(`[Agent] User message with context:`, userMessage);
+
     const messages: Anthropic.MessageParam[] = [
       {
         role: 'user',
-        content: request.intent,
+        content: userMessage,
       },
     ];
 
