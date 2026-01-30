@@ -1,11 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { GitHubServer } from '../mcp/github/server';
+import { MCPClientManager } from '../mcp/client-manager';
 import { DecisionLogServer } from '../mcp/decision-log/server';
 import { ChallengeServer } from '../mcp/challenge/server';
 import { WikiServer } from '../mcp/wiki/server';
+import { LangfuseServer } from '../mcp/langfuse/server';
+import { DeveloperServer } from '../mcp/developer/server';
 
 /**
- * Result of a tool execution
+ * Tool execution result
  */
 export interface ToolResult {
   success: boolean;
@@ -13,54 +15,41 @@ export interface ToolResult {
   error?: string;
 }
 
-interface ToolHandler {
-  server: string;
-  execute: (args: Record<string, unknown>) => Promise<unknown>;
-}
-
 /**
- * MCP Tool Executor
+ * MCP Executor
  *
- * Routes tool calls to the appropriate MCP server and executes them.
- * Servers are injected to allow proper dependency management.
+ * Combines official MCP servers (via MCPClientManager) with custom
+ * governance-specific servers (decision-log, challenge, wiki).
+ *
+ * This allows us to use:
+ * - Official servers: GitHub, Filesystem, Git (via MCP protocol)
+ * - Custom servers: Decision logging, challenges, wiki (direct implementation)
  */
 export class MCPExecutor {
-  // Map tool names to their handlers
-  private toolServerMap: Map<string, ToolHandler>;
+  private customToolHandlers: Map<string, {
+    server: string;
+    execute: (args: Record<string, unknown>) => Promise<unknown>;
+  }> = new Map();
 
   constructor(
-    private readonly githubServer: GitHubServer,
+    private readonly mcpClient: MCPClientManager,
     private readonly decisionLogServer: DecisionLogServer,
     private readonly challengeServer: ChallengeServer,
-    private readonly wikiServer: WikiServer
+    private readonly wikiServer: WikiServer,
+    private readonly langfuseServer?: LangfuseServer,
+    private readonly developerServer?: DeveloperServer
   ) {
-    this.toolServerMap = new Map();
-    this.registerTools();
+    this.registerCustomTools();
   }
 
-  private registerTools(): void {
-    // GitHub tools
-    const githubTools = [
-      'github_get_pr',
-      'github_get_issue',
-      'github_list_files',
-      'github_comment',
-      'github_request_changes',
-      'github_approve',
-      'github_merge',
-      'github_close',
-    ];
-    for (const tool of githubTools) {
-      this.toolServerMap.set(tool, {
-        server: 'github',
-        execute: (args) => this.githubServer.executeTool(tool, args),
-      });
-    }
-
+  /**
+   * Register handlers for custom governance tools
+   */
+  private registerCustomTools(): void {
     // Decision log tools
     const decisionTools = ['search_decisions', 'get_decision', 'log_decision'];
     for (const tool of decisionTools) {
-      this.toolServerMap.set(tool, {
+      this.customToolHandlers.set(tool, {
         server: 'decision-log',
         execute: (args) => this.decisionLogServer.executeTool(tool, args),
       });
@@ -69,7 +58,7 @@ export class MCPExecutor {
     // Challenge tools
     const challengeTools = ['submit_challenge', 'list_challenges', 'respond_to_challenge'];
     for (const tool of challengeTools) {
-      this.toolServerMap.set(tool, {
+      this.customToolHandlers.set(tool, {
         server: 'challenge',
         execute: (args) => this.challengeServer.executeTool(tool, args),
       });
@@ -86,89 +75,156 @@ export class MCPExecutor {
       'wiki_reject_draft',
     ];
     for (const tool of wikiTools) {
-      this.toolServerMap.set(tool, {
+      this.customToolHandlers.set(tool, {
         server: 'wiki',
         execute: (args) => this.wikiServer.executeTool(tool, args),
       });
+    }
+
+    // Langfuse tools (for self-observation)
+    if (this.langfuseServer) {
+      const langfuseTools = [
+        'langfuse_query_traces',
+        'langfuse_get_trace',
+        'langfuse_query_scores',
+        'langfuse_add_score',
+        'langfuse_get_metrics',
+        'langfuse_analyze_sessions',
+      ];
+      for (const tool of langfuseTools) {
+        this.customToolHandlers.set(tool, {
+          server: 'langfuse',
+          execute: (args) => this.langfuseServer!.executeTool(tool, args),
+        });
+      }
+    }
+
+    // Developer tools (for invoking Claude Code)
+    if (this.developerServer) {
+      const developerTools = [
+        'developer_invoke',
+        'developer_resume',
+        'developer_get_session',
+        'developer_list_sessions',
+      ];
+      for (const tool of developerTools) {
+        this.customToolHandlers.set(tool, {
+          server: 'developer',
+          execute: (args) => this.developerServer!.executeTool(tool, args),
+        });
+      }
     }
   }
 
   /**
    * Execute a tool by name
    *
-   * @param toolName - Name of the tool to execute
-   * @param args - Tool arguments
-   * @returns Tool result
+   * Routes to either the MCP client (for official servers) or
+   * custom handlers (for governance-specific tools).
    */
   async executeTool(toolName: string, args: Record<string, unknown>): Promise<ToolResult> {
-    const handler = this.toolServerMap.get(toolName);
+    // Check custom tools first
+    const customHandler = this.customToolHandlers.get(toolName);
+    if (customHandler) {
+      try {
+        const result = await customHandler.execute(args);
+        return {
+          success: true,
+          result,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
+    }
 
-    if (!handler) {
+    // Try MCP client for official servers
+    if (this.mcpClient.hasTool(toolName)) {
+      const mcpResult = await this.mcpClient.callTool(toolName, args);
       return {
-        success: false,
-        error: `Unknown tool: ${toolName}`,
+        success: mcpResult.success,
+        result: mcpResult.content,
+        error: mcpResult.error,
       };
     }
 
-    try {
-      const result = await handler.execute(args);
-      return {
-        success: true,
-        result,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
-    }
+    return {
+      success: false,
+      error: `Unknown tool: ${toolName}`,
+    };
   }
 
   /**
-   * Get all available tool definitions for Claude API
+   * Get all available tool definitions in Claude API format
    *
-   * @param allowedTools - Optional list of allowed tool names (filter)
-   * @param deniedTools - Optional list of denied tool names (filter)
-   * @returns Tool definitions in Claude API format
+   * Combines tools from MCP client and custom servers.
    */
   getToolDefinitions(allowedTools?: string[], deniedTools?: string[]): Anthropic.Tool[] {
-    const allTools = [
-      ...this.githubServer.getToolDefinitions(),
-      ...this.decisionLogServer.getToolDefinitions(),
-      ...this.challengeServer.getToolDefinitions(),
-      ...this.wikiServer.getToolDefinitions(),
-    ];
+    const allTools: Anthropic.Tool[] = [];
 
+    // Add tools from MCP client (official servers)
+    const mcpTools = this.mcpClient.getToolDefinitions();
+    allTools.push(...mcpTools);
+
+    // Add tools from custom servers
+    allTools.push(...this.decisionLogServer.getToolDefinitions());
+    allTools.push(...this.challengeServer.getToolDefinitions());
+    allTools.push(...this.wikiServer.getToolDefinitions());
+    if (this.langfuseServer) {
+      allTools.push(...this.langfuseServer.getToolDefinitions());
+    }
+    if (this.developerServer) {
+      allTools.push(...this.developerServer.getToolDefinitions());
+    }
+
+    // Apply role-based filtering
     return allTools.filter((tool) => {
-      // If allowed list is specified, tool must be in it
       if (allowedTools && allowedTools.length > 0) {
         if (!allowedTools.includes(tool.name)) {
           return false;
         }
       }
-
-      // If denied list is specified, tool must not be in it
       if (deniedTools && deniedTools.length > 0) {
         if (deniedTools.includes(tool.name)) {
           return false;
         }
       }
-
       return true;
     });
   }
 
   /**
-   * Check if a tool exists
+   * Check if a tool exists (in either MCP client or custom handlers)
    */
-  hasToolHandler(toolName: string): boolean {
-    return this.toolServerMap.has(toolName);
+  hasTool(toolName: string): boolean {
+    return this.customToolHandlers.has(toolName) || this.mcpClient.hasTool(toolName);
   }
 
   /**
    * Get the server name for a tool
    */
   getToolServer(toolName: string): string | undefined {
-    return this.toolServerMap.get(toolName)?.server;
+    const customHandler = this.customToolHandlers.get(toolName);
+    if (customHandler) {
+      return customHandler.server;
+    }
+    return this.mcpClient.getToolServer(toolName);
+  }
+
+  /**
+   * Get summary of connected servers
+   */
+  getServerSummary(): { mcpServers: string[]; customServers: string[] } {
+    const customServers = new Set<string>();
+    for (const handler of this.customToolHandlers.values()) {
+      customServers.add(handler.server);
+    }
+
+    return {
+      mcpServers: this.mcpClient.getConnectedServers(),
+      customServers: Array.from(customServers),
+    };
   }
 }

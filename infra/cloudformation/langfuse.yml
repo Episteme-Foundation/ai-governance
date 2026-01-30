@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Langfuse - Self-hosted LLM Observability'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+
+  DatabaseStackName:
+    Type: String
+    Default: ai-governance-database
+    Description: Name of the database CloudFormation stack
+
+  NextAuthSecret:
+    Type: String
+    NoEcho: true
+    Description: Random string for NextAuth session encryption (min 32 characters)
+    MinLength: 32
+
+  Salt:
+    Type: String
+    NoEcho: true
+    Description: Random string for hashing (min 32 characters)
+    MinLength: 32
+
+Resources:
+  # IAM Role for App Runner to access ECR (public images)
+  LangfuseAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: langfuse-apprunner-access
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: build.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+
+  # IAM Role for Langfuse instance
+  LangfuseInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: langfuse-apprunner-instance
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: tasks.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:langfuse/*'
+
+  # Store Langfuse secrets
+  LangfuseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: langfuse/config
+      Description: Langfuse configuration secrets
+      SecretString: !Sub |
+        {
+          "NEXTAUTH_SECRET": "${NextAuthSecret}",
+          "SALT": "${Salt}"
+        }
+
+  # Langfuse App Runner Service
+  LangfuseService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: langfuse
+      SourceConfiguration:
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt LangfuseAccessRole.Arn
+        AutoDeploymentsEnabled: false
+        ImageRepository:
+          # Use the official Langfuse image from Docker Hub
+          ImageIdentifier: langfuse/langfuse:latest
+          ImageRepositoryType: ECR_PUBLIC
+          ImageConfiguration:
+            Port: '3000'
+            RuntimeEnvironmentVariables:
+              - Name: NODE_ENV
+                Value: !Ref Environment
+              # Database connection - imports from database stack
+              - Name: DATABASE_URL
+                Value:
+                  Fn::Sub:
+                    - 'postgresql://postgres:${Password}@${Host}:5432/langfuse'
+                    - Host:
+                        Fn::ImportValue: !Sub '${DatabaseStackName}-DBEndpoint'
+                      Password: '{{resolve:secretsmanager:ai-governance/database:SecretString:password}}'
+              # NextAuth configuration
+              - Name: NEXTAUTH_SECRET
+                Value: !Ref NextAuthSecret
+              - Name: SALT
+                Value: !Ref Salt
+              # Will be set to actual URL after deployment
+              - Name: NEXTAUTH_URL
+                Value: 'https://placeholder.awsapprunner.com'
+              # Telemetry (can disable if you prefer)
+              - Name: TELEMETRY_ENABLED
+                Value: 'false'
+              # Enable public sign-up for initial setup, disable after
+              - Name: AUTH_DISABLE_SIGNUP
+                Value: 'false'
+      InstanceConfiguration:
+        Cpu: '512'
+        Memory: '1024'
+        InstanceRoleArn: !GetAtt LangfuseInstanceRole.Arn
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /api/public/health
+        Interval: 20
+        Timeout: 10
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+
+Outputs:
+  LangfuseUrl:
+    Description: Langfuse dashboard URL
+    Value: !Sub 'https://${LangfuseService.ServiceUrl}'
+    Export:
+      Name: !Sub '${AWS::StackName}-LangfuseUrl'
+
+  LangfuseApiUrl:
+    Description: Langfuse API base URL (use in LANGFUSE_BASE_URL)
+    Value: !Sub 'https://${LangfuseService.ServiceUrl}'
+    Export:
+      Name: !Sub '${AWS::StackName}-LangfuseApiUrl'
+
+  SetupInstructions:
+    Description: Post-deployment steps
+    Value: |
+      1. Update NEXTAUTH_URL to the actual ServiceUrl
+      2. Create a Langfuse user via the web UI
+      3. Create an API key pair in Langfuse settings
+      4. Add LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY to ai-governance/app-config secret
+      5. Set LANGFUSE_BASE_URL to the LangfuseApiUrl output

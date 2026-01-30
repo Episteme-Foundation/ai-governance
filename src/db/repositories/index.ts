@@ -4,4 +4,11 @@ export { WikiDraftRepository } from './wiki-draft-repository';
 export { ChallengeRepository } from './challenge-repository';
 export { SessionRepository } from './session-repository';
 export { AuditRepository } from './audit-repository';
+export { ConversationRepository, ConversationTurn } from './conversation-repository';
+export {
+  ConversationThreadRepository,
+  ConversationThread,
+  ConversationMessage,
+  Participant,
+} from './conversation-thread-repository';
 // TODO: Implement WikiMetadataRepository

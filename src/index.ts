@@ -7,6 +7,8 @@ import {
   AuditRepository,
   ChallengeRepository,
   WikiDraftRepository,
+  ConversationRepository,
+  ConversationThreadRepository,
 } from './db/repositories';
 import { DecisionLoader, WikiLoader } from './context/loaders';
 import {
@@ -20,10 +22,12 @@ import { AgentInvoker } from './orchestration/invoke';
 import { MCPExecutor } from './orchestration/mcp-executor';
 import { GovernanceServer } from './api/server';
 import { loadSecrets } from './config/load-secrets';
-import { GitHubServer } from './mcp/github/server';
+import { createMCPClientManager, ServerPresets } from './mcp/server-factory';
 import { DecisionLogServer } from './mcp/decision-log/server';
 import { ChallengeServer } from './mcp/challenge/server';
 import { WikiServer } from './mcp/wiki/server';
+import { LangfuseServer } from './mcp/langfuse/server';
+import { isLangfuseEnabled, shutdownLangfuse } from './observability';
 
 /**
  * Main entry point for AI Governance application
@@ -68,6 +72,8 @@ async function main() {
   const auditRepo = new AuditRepository(dbPool);
   const challengeRepo = new ChallengeRepository(dbPool);
   const wikiDraftRepo = new WikiDraftRepository(dbPool);
+  const conversationRepo = new ConversationRepository(dbPool);
+  const conversationThreadRepo = new ConversationThreadRepository(dbPool);
 
   // 3. Services
   const embeddingProvider = new OpenAIEmbeddingProvider(openaiApiKey);
@@ -78,21 +84,37 @@ async function main() {
   const promptBuilder = new SystemPromptBuilder(
     embeddingsService,
     decisionLoader,
-    process.cwd()
+    process.cwd(),
+    conversationThreadRepo
   );
 
   // 5. MCP Servers
-  const githubServer = new GitHubServer();
+  // Create MCP client manager for official servers (GitHub, Filesystem, Git)
+  const githubToken = process.env.GITHUB_TOKEN;
+  const mcpClient = await createMCPClientManager(
+    githubToken
+      ? ServerPresets.localDevelopment(process.cwd(), githubToken)
+      : { allowedPaths: [process.cwd()] }
+  );
+
+  // Custom governance servers
   const decisionLogServer = new DecisionLogServer(decisionRepo, embeddingsService);
   const challengeServer = new ChallengeServer(challengeRepo);
   const wikiServer = new WikiServer(wikiDraftRepo, WikiLoader);
 
+  // Langfuse server for self-observation (optional)
+  const langfuseServer = isLangfuseEnabled() ? new LangfuseServer() : undefined;
+  if (langfuseServer) {
+    console.log('Langfuse enabled - agents can query their own operations');
+  }
+
   // 6. MCP Executor (routes tool calls to appropriate server)
   const mcpExecutor = new MCPExecutor(
-    githubServer,
+    mcpClient,
     decisionLogServer,
     challengeServer,
-    wikiServer
+    wikiServer,
+    langfuseServer
   );
 
   // 7. Orchestration
@@ -110,7 +132,9 @@ async function main() {
     auditRepo,
     decisionRepo,
     embeddingsService,
-    mcpExecutor
+    mcpExecutor,
+    conversationRepo,
+    conversationThreadRepo
   );
 
   // 6. API Server
@@ -125,6 +149,7 @@ async function main() {
   process.on('SIGTERM', async () => {
     console.log('SIGTERM received, shutting down gracefully...');
     await server.stop();
+    await shutdownLangfuse();
     await dbPool.end();
     process.exit(0);
   });
@@ -132,6 +157,7 @@ async function main() {
   process.on('SIGINT', async () => {
     console.log('SIGINT received, shutting down gracefully...');
     await server.stop();
+    await shutdownLangfuse();
     await dbPool.end();
     process.exit(0);
   });

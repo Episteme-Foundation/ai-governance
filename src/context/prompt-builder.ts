@@ -6,6 +6,10 @@ import {
 } from './loaders';
 import { EmbeddingsService } from './embeddings';
 import { GovernanceRequest, RoleDefinition, ProjectConfig } from '../types';
+import {
+  ConversationThreadRepository,
+  Participant,
+} from '../db/repositories/conversation-thread-repository';
 
 /**
  * Builds system prompts for governance agents
@@ -14,7 +18,8 @@ export class SystemPromptBuilder {
   constructor(
     private readonly embeddingsService: EmbeddingsService,
     private readonly decisionLoader: DecisionLoader,
-    private readonly projectRoot: string = process.cwd()
+    private readonly projectRoot: string = process.cwd(),
+    private readonly conversationThreadRepo?: ConversationThreadRepository
   ) {}
 
   /**
@@ -91,7 +96,16 @@ export class SystemPromptBuilder {
       }
     }
 
-    // 6. Request Context (what they're being asked to do)
+    // 6. Active Work Context (awareness of ongoing work)
+    const activeWorkContext = await this.buildActiveWorkContext(
+      project.id,
+      role.name
+    );
+    if (activeWorkContext) {
+      sections.push('\n\n# Active Work\n\n' + activeWorkContext);
+    }
+
+    // 7. Request Context (what they're being asked to do)
     sections.push('\n\n# Current Request\n\n');
     sections.push(`**Trust Level:** ${request.trust}\n`);
     sections.push(`**Source:** ${request.source.channel}\n`);
@@ -102,5 +116,60 @@ export class SystemPromptBuilder {
 
     // Join all sections
     return sections.join('\n');
+  }
+
+  /**
+   * Build context about active work for this role
+   * Provides awareness of ongoing conversations and work items
+   */
+  private async buildActiveWorkContext(
+    projectId: string,
+    roleName: string
+  ): Promise<string | null> {
+    if (!this.conversationThreadRepo) {
+      return null;
+    }
+
+    const participant: Participant = { type: 'role', id: roleName };
+    const activeConversations =
+      await this.conversationThreadRepo.getActiveForParticipant(
+        projectId,
+        participant
+      );
+
+    if (activeConversations.length === 0) {
+      return null;
+    }
+
+    const lines: string[] = [];
+    lines.push(
+      `You have ${activeConversations.length} active conversation(s) that may be relevant:\n`
+    );
+
+    for (const conv of activeConversations.slice(0, 5)) {
+      // Limit to 5 for context size
+      const otherParticipants = conv.participants
+        .filter((p) => !(p.type === 'role' && p.id === roleName))
+        .map((p) => p.id)
+        .join(', ');
+
+      lines.push(`- **${conv.id}** with ${otherParticipants}`);
+      if (conv.topic) {
+        lines.push(`  Topic: ${conv.topic}`);
+      }
+      lines.push(`  Updated: ${conv.updatedAt}`);
+    }
+
+    if (activeConversations.length > 5) {
+      lines.push(
+        `\n...and ${activeConversations.length - 5} more. Use list_conversations() to see all.`
+      );
+    }
+
+    lines.push(
+      '\nUse get_conversation() to review any conversation before responding to related matters.'
+    );
+
+    return lines.join('\n');
   }
 }
