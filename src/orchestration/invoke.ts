@@ -114,6 +114,9 @@ export class AgentInvoker {
       role.tools.denied.length > 0 ? role.tools.denied : undefined
     );
 
+    console.log(`[Agent] Tools available for role ${role.name}:`, tools.map(t => t.name));
+    console.log(`[Agent] Role allowed tools:`, role.tools.allowed);
+
     // 5. Build initial messages
     const messages: Anthropic.MessageParam[] = [
       {
@@ -144,6 +147,8 @@ export class AgentInvoker {
           messages,
           tools: tools.length > 0 ? tools : undefined,
         });
+
+        console.log(`[Agent] Claude response - stop_reason: ${response.stop_reason}, content_types:`, response.content.map(c => c.type));
 
         // Process response content
         const assistantContent: ContentBlock[] = [];
