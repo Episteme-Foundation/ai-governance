@@ -14,6 +14,9 @@ Parameters:
     Default: ai-governance-database
     Description: Name of the database CloudFormation stack
 
+  # Note: ECR repository 'langfuse' must have an image before deploying
+  # Use the deploy-langfuse GitHub Actions workflow to mirror from Docker Hub
+
   NextAuthSecret:
     Type: String
     NoEcho: true
@@ -27,7 +30,7 @@ Parameters:
     MinLength: 32
 
 Resources:
-  # IAM Role for App Runner to access ECR (public images)
+  # IAM Role for App Runner to access ECR
   LangfuseAccessRole:
     Type: AWS::IAM::Role
     Properties:
@@ -39,6 +42,8 @@ Resources:
             Principal:
               Service: build.apprunner.amazonaws.com
             Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
 
   # IAM Role for Langfuse instance
   LangfuseInstanceRole:
@@ -94,9 +99,9 @@ Resources:
           AccessRoleArn: !GetAtt LangfuseAccessRole.Arn
         AutoDeploymentsEnabled: false
         ImageRepository:
-          # Use the official Langfuse image from Docker Hub
-          ImageIdentifier: langfuse/langfuse:latest
-          ImageRepositoryType: ECR_PUBLIC
+          # Image mirrored from Docker Hub via GitHub Actions workflow
+          ImageIdentifier: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/langfuse:latest'
+          ImageRepositoryType: ECR
           ImageConfiguration:
             Port: '3000'
             RuntimeEnvironmentVariables:
@@ -115,18 +120,18 @@ Resources:
                 Value: !Ref NextAuthSecret
               - Name: SALT
                 Value: !Ref Salt
-              # Will be set to actual URL after deployment
+              # Will be updated to actual URL after first deployment
               - Name: NEXTAUTH_URL
                 Value: 'https://placeholder.awsapprunner.com'
-              # Telemetry (can disable if you prefer)
+              # Telemetry disabled
               - Name: TELEMETRY_ENABLED
                 Value: 'false'
               # Enable public sign-up for initial setup, disable after
               - Name: AUTH_DISABLE_SIGNUP
                 Value: 'false'
       InstanceConfiguration:
-        Cpu: '512'
-        Memory: '1024'
+        Cpu: '1024'
+        Memory: '2048'
         InstanceRoleArn: !GetAtt LangfuseInstanceRole.Arn
       HealthCheckConfiguration:
         Protocol: HTTP
@@ -149,11 +154,17 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-LangfuseApiUrl'
 
+  ECRRepositoryUri:
+    Description: ECR repository URI for Langfuse image
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/langfuse'
+    Export:
+      Name: !Sub '${AWS::StackName}-ECRRepositoryUri'
+
   SetupInstructions:
     Description: Post-deployment steps
     Value: |
-      1. Update NEXTAUTH_URL to the actual ServiceUrl
+      1. Update NEXTAUTH_URL environment variable to the actual LangfuseUrl
       2. Create a Langfuse user via the web UI
       3. Create an API key pair in Langfuse settings
-      4. Add LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY to ai-governance/app-config secret
-      5. Set LANGFUSE_BASE_URL to the LangfuseApiUrl output
+      4. Add LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL to ai-governance/app-config secret
+      5. Redeploy ai-governance to pick up the new Langfuse configuration

@@ -1,0 +1,135 @@
+name: Deploy Langfuse
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      langfuse_version:
+        description: 'Langfuse version tag (default: latest)'
+        required: false
+        default: 'latest'
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: langfuse
+  UPSTREAM_IMAGE: langfuse/langfuse
+  DATABASE_STACK_NAME: ai-governance-database
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create ECR repository if needed
+        run: |
+          aws ecr describe-repositories --repository-names ${{ env.ECR_REPOSITORY }} 2>/dev/null || \
+          aws ecr create-repository \
+            --repository-name ${{ env.ECR_REPOSITORY }} \
+            --image-scanning-configuration scanOnPush=true
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Pull from Docker Hub and push to ECR
+        id: mirror-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          VERSION: ${{ github.event.inputs.langfuse_version || 'latest' }}
+        run: |
+          echo "Pulling ${{ env.UPSTREAM_IMAGE }}:$VERSION from Docker Hub..."
+          docker pull ${{ env.UPSTREAM_IMAGE }}:$VERSION
+
+          echo "Tagging for ECR..."
+          docker tag ${{ env.UPSTREAM_IMAGE }}:$VERSION $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$VERSION
+          docker tag ${{ env.UPSTREAM_IMAGE }}:$VERSION $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
+
+          echo "Pushing to ECR..."
+          docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$VERSION
+          docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
+
+          echo "image=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate secrets
+        id: secrets
+        run: |
+          echo "nextauth_secret=$(openssl rand -base64 32)" >> $GITHUB_OUTPUT
+          echo "salt=$(openssl rand -base64 32)" >> $GITHUB_OUTPUT
+
+      - name: Deploy CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name langfuse \
+            --template-file infra/cloudformation/langfuse.yml \
+            --parameter-overrides \
+                DatabaseStackName=${{ env.DATABASE_STACK_NAME }} \
+                NextAuthSecret="${{ steps.secrets.outputs.nextauth_secret }}" \
+                Salt="${{ steps.secrets.outputs.salt }}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Wait for App Runner service
+        run: |
+          echo "Waiting for App Runner service to be ready..."
+          for i in {1..30}; do
+            STATUS=$(aws apprunner list-services \
+              --query "ServiceSummaryList[?ServiceName=='langfuse'].Status" \
+              --output text 2>/dev/null || echo "PENDING")
+            echo "Status: $STATUS"
+            if [ "$STATUS" == "RUNNING" ]; then
+              echo "Service is running!"
+              break
+            fi
+            sleep 10
+          done
+
+      - name: Trigger App Runner deployment
+        run: |
+          SERVICE_ARN=$(aws apprunner list-services \
+            --query "ServiceSummaryList[?ServiceName=='langfuse'].ServiceArn" \
+            --output text)
+
+          if [ -n "$SERVICE_ARN" ] && [ "$SERVICE_ARN" != "None" ]; then
+            aws apprunner start-deployment --service-arn $SERVICE_ARN
+            echo "Deployment triggered for: $SERVICE_ARN"
+          else
+            echo "App Runner service not found or still creating"
+          fi
+
+      - name: Get Langfuse URL
+        id: get-url
+        run: |
+          LANGFUSE_URL=$(aws cloudformation describe-stacks \
+            --stack-name langfuse \
+            --query "Stacks[0].Outputs[?OutputKey=='LangfuseUrl'].OutputValue" \
+            --output text 2>/dev/null || echo "pending")
+          echo "langfuse_url=$LANGFUSE_URL" >> $GITHUB_OUTPUT
+          echo "Langfuse URL: $LANGFUSE_URL"
+
+      - name: Summary
+        run: |
+          echo "## Langfuse Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ steps.mirror-image.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Langfuse URL:** ${{ steps.get-url.outputs.langfuse_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. Wait for App Runner to finish deploying (may take a few minutes)" >> $GITHUB_STEP_SUMMARY
+          echo "2. Go to the Langfuse URL and create an account" >> $GITHUB_STEP_SUMMARY
+          echo "3. Create API keys in Settings > API Keys" >> $GITHUB_STEP_SUMMARY
+          echo "4. Add keys to \`ai-governance/app-config\` secret in AWS Secrets Manager" >> $GITHUB_STEP_SUMMARY
+          echo "5. Redeploy ai-governance to pick up the new config" >> $GITHUB_STEP_SUMMARY
