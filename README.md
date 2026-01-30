@@ -214,6 +214,19 @@ The framework doesn't prescribe specific organizational structures. Projects cho
 - [x] GitHub App integration (webhook receiving events)
 - [x] CI/CD pipeline (GitHub Actions → App Runner)
 - [x] Full agent loop implementation
+- [x] Unified conversation system (agent-to-agent communication)
+- [x] Langfuse observability integration
+
+---
+
+## Agent Communication
+
+Agents can communicate with each other using two patterns:
+
+- **Synchronous (`converse`)** — Block and wait for a response. Used for real-time deliberation.
+- **Asynchronous (`send`)** — Send a notification and continue. Creates a GitHub issue for routing.
+
+This enables complex workflows where agents can delegate, escalate, and collaborate.
 
 ---
 
@@ -231,4 +244,3 @@ Contributions are welcome. The framework's own governance principles apply:
 ## License
 
 MIT License. See LICENSE file.
-# Test Fri Jan 30 09:46:40 EST 2026
