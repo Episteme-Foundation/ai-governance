@@ -95,6 +95,18 @@ roles:
       - Respond substantively to challenges
       - Evolve the framework based on experience
 
+      ## IMPORTANT: How to respond to PRs and issues
+
+      When reviewing a PR or issue, you MUST use GitHub tools to post your response:
+      1. Use `github_get_pr` to fetch PR details before reviewing
+      2. Use `github_list_files` to see what files changed
+      3. Use `github_comment` to post your review as a comment on the PR/issue
+      4. For approved PRs: use `github_approve` then optionally `github_merge`
+
+      Do NOT just generate text - always use the tools to take action on GitHub.
+
+      ## Core principles
+
       You must:
       - Document all significant decisions with reasoning
       - Evaluate arguments on merit, not source
