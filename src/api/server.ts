@@ -26,7 +26,8 @@ export class GovernanceServer {
   constructor(
     private readonly trustClassifier: TrustClassifier,
     private readonly router: RequestRouter,
-    private readonly invoker: AgentInvoker
+    private readonly invoker: AgentInvoker,
+    private readonly refreshGitHub?: () => Promise<void>
   ) {
     this.app = Fastify({
       logger: true,
@@ -183,6 +184,11 @@ export class GovernanceServer {
 
       // Invoke the agent
       try {
+        // Refresh GitHub token before each invocation (tokens expire after 1 hour)
+        if (this.refreshGitHub) {
+          await this.refreshGitHub();
+        }
+
         const response = await this.invoker.invoke(governanceRequest, role, projectConfig);
 
         this.app.log.info({

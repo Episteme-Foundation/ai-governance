@@ -233,6 +233,19 @@ export class MCPClientManager {
   }
 
   /**
+   * Reconnect to a server with updated configuration
+   * Useful for refreshing authentication tokens
+   */
+  async reconnect(config: MCPServerConfig): Promise<void> {
+    // Disconnect if already connected
+    if (this.servers.has(config.name)) {
+      await this.disconnect(config.name);
+    }
+    // Connect with new config
+    await this.connect(config);
+  }
+
+  /**
    * Call a tool by name
    */
   async callTool(toolName: string, args: Record<string, unknown>): Promise<MCPToolResult> {
