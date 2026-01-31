@@ -77,5 +77,6 @@ export {
   CreateIssueCallback,
   NotificationType,
 } from './conversation/server';
-// Note: GitHubServer is deprecated in favor of official MCP server
-// export { GitHubServer } from './github/server';
+
+// GitHub authentication utilities (for generating installation tokens)
+export { getInstallationToken } from './github/auth';

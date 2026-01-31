@@ -23,6 +23,7 @@ import { MCPExecutor } from './orchestration/mcp-executor';
 import { GovernanceServer } from './api/server';
 import { loadSecrets } from './config/load-secrets';
 import { createMCPClientManager, ServerPresets } from './mcp/server-factory';
+import { getInstallationToken } from './mcp/github/auth';
 import { DecisionLogServer } from './mcp/decision-log/server';
 import { ChallengeServer } from './mcp/challenge/server';
 import { WikiServer } from './mcp/wiki/server';
@@ -90,7 +91,30 @@ async function main() {
 
   // 5. MCP Servers
   // Create MCP client manager for official servers (GitHub, Filesystem, Git)
-  const githubToken = process.env.GITHUB_TOKEN;
+  // Generate GitHub installation token from App credentials
+  let githubToken: string | undefined;
+  const githubRepository = process.env.GITHUB_REPOSITORY;
+
+  if (githubRepository) {
+    const [owner, repo] = githubRepository.split('/');
+    if (owner && repo) {
+      try {
+        githubToken = await getInstallationToken(owner, repo);
+        console.log(`Generated GitHub installation token for ${githubRepository}`);
+      } catch (error) {
+        console.warn(
+          'Failed to generate GitHub installation token:',
+          error instanceof Error ? error.message : 'Unknown error'
+        );
+        console.warn('GitHub tools will not be available to agents');
+      }
+    } else {
+      console.warn(`Invalid GITHUB_REPOSITORY format: ${githubRepository} (expected owner/repo)`);
+    }
+  } else {
+    console.warn('GITHUB_REPOSITORY not set - GitHub tools will not be available');
+  }
+
   const mcpClient = await createMCPClientManager(
     githubToken
       ? ServerPresets.localDevelopment(process.cwd(), githubToken)
