@@ -426,7 +426,7 @@ export class AgentInvoker {
           createGeneration(langfuseTrace, {
             name: `turn-${iterations}`,
             model: response.model,
-            input: messages,
+            input: { system: systemPrompt, messages },
             output: response.content,
             usage: {
               input: response.usage?.input_tokens,
