@@ -331,12 +331,22 @@ export class AgentInvoker {
     // 5. Build initial messages with context from the request
     // Extract key context from payload for tool usage
     const payload = request.payload || {};
-    const owner = payload.owner as string || '';
-    const repo = payload.repo as string || '';
+    let owner = payload.owner as string || '';
+    let repo = payload.repo as string || '';
     const pullRequest = payload.pull_request as Record<string, unknown> | undefined;
     const issue = payload.issue as Record<string, unknown> | undefined;
     const prNumber = pullRequest?.number;
     const issueNumber = issue?.number;
+
+    // Derive owner/repo from project config if not in payload
+    if (!owner || !repo) {
+      const repoUrl = project.repository || '';
+      const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+      if (match) {
+        owner = owner || match[1];
+        repo = repo || match[2].replace(/\.git$/, '');
+      }
+    }
 
     let userMessage = request.intent;
 
@@ -345,6 +355,7 @@ export class AgentInvoker {
       userMessage += `\n\n[You are responding within conversation ${conversationId}. Your response will be returned to the agent who invoked you.]`;
     }
 
+    // Always include GitHub context when available
     if (owner && repo) {
       userMessage += `\n\nContext for GitHub API calls:\n- Owner: ${owner}\n- Repo: ${repo}`;
       if (prNumber) userMessage += `\n- PR Number: ${prNumber}`;
@@ -392,12 +403,21 @@ export class AgentInvoker {
       while (continueLoop && iterations < maxIterations) {
         iterations++;
 
-        // Call Claude API
+        // Call Claude API with prompt caching for the system prompt.
+        // The system prompt (philosophy + constitution + role instructions) is
+        // large and stable across turns, so caching saves significant tokens.
         const apiStartTime = Date.now();
+        // Use type assertion for cache_control (supported by API but not yet
+        // typed in SDK v0.31.0)
+        const systemBlock = {
+          type: 'text' as const,
+          text: systemPrompt,
+          cache_control: { type: 'ephemeral' as const },
+        };
         const response = await this.anthropic.messages.create({
           model: 'claude-opus-4-5-20251101',
           max_tokens: 8192,
-          system: systemPrompt,
+          system: [systemBlock] as unknown as Anthropic.Messages.TextBlockParam[],
           messages,
           tools: tools.length > 0 ? tools : undefined,
         });
