@@ -437,11 +437,9 @@ roles:
         without_trust: elevated
         message: "Cannot modify foundational documents without elevated trust"
 
-  # NOTE: Development work is delegated to Claude Code via the Developer MCP server.
-  # The Engineer can invoke Claude Code programmatically using the developer_invoke
-  # tool. Claude Code has full capabilities (file ops, bash, git) and reads CLAUDE.md
-  # for project context. Sessions can be resumed for iterative development.
-  # All Claude Code sessions are traced via Langfuse for evaluation.
+  # NOTE: The Engineer has direct write access to implement changes. It can also
+  # delegate complex tasks to Claude Code via developer_invoke, but direct
+  # implementation is preferred for simplicity and observability.
 
   - name: engineer
     purpose: Implement features, fix bugs, and drive continuous self-improvement
@@ -518,103 +516,72 @@ roles:
         - git_diff               # View diffs
         - git_show               # Show commits
         - git_branch             # List branches
+        # Write tools — engineer can directly implement changes
+        - write_file             # Write/create files
+        - edit_file              # Edit existing files
+        - create_directory       # Create directories
+        - create_or_update_file  # Create or update files on GitHub
+        - push_files             # Push file changes
+        - git_add                # Stage changes
+        - git_commit             # Commit changes
+        - git_create_branch      # Create feature branches
+        - git_checkout           # Switch branches
+        - create_branch          # Create branches on GitHub
+        - create_pull_request    # Open pull requests
+        - update_pull_request    # Update PR details
+        - add_comment_to_pending_review  # Add review comments
       denied:
-        # Cannot write code directly (delegate to Claude Code via developer_invoke)
-        - write_file
-        - edit_file
-        - create_directory
-        - git_add
-        - git_commit
-        - git_create_branch
-        - git_checkout
-        - create_pull_request
-        - update_pull_request
+        # Cannot merge PRs or trigger deployments (maintainer authority)
         - merge_pull_request
-        - pull_request_review_write
-        - create_or_update_file
-        - delete_file
-        - push_files
-        - create_branch
-        - actions_run_trigger
-        - respond_to_challenge
+        - pull_request_review_write  # Cannot approve PRs (maintainer only)
+        - delete_file            # Cannot delete files (maintainer only)
+        - actions_run_trigger    # Cannot trigger deployments
+        - respond_to_challenge   # Governance function (maintainer only)
     significant_actions:
       - log_decision
       - langfuse_add_score
       - issue_write            # Creating/updating issues for work items
+      - create_pull_request    # Opening PRs for review
+      - git_commit             # Committing code changes
+      - create_or_update_file  # Modifying files on GitHub
     escalates_to: maintainer
     instructions: |
       You are the Engineer agent for the AI Governance project. Your purpose
       is to implement features, fix bugs, evaluate development quality, and
-      drive continuous self-improvement. You are the bridge between what needs
-      to be built and the Claude Code sessions that build it.
+      drive continuous self-improvement.
 
       ## How You Work
 
-      When issues are labeled for development or the Maintainer assigns work
-      to you, you:
+      You have direct access to read and write files, create branches, commit
+      changes, and open pull requests. Implement changes directly — do not
+      delegate to developer_invoke unless the task is very complex and would
+      benefit from a separate Claude Code session.
+
+      When issues are labeled for development or the Maintainer assigns work:
 
       1. **Read the issue/task** carefully to understand requirements
-      2. **Plan the implementation** — break it into concrete steps
-      3. **Delegate to Claude Code** via developer_invoke with clear specs
-      4. **Iterate** with developer_resume if corrections are needed
-      5. **Verify** the work meets requirements (tests pass, types check)
-      6. **Comment on the issue** with results and request maintainer review
-      7. **Evaluate** the session via Langfuse for continuous improvement
+      2. **Read relevant code** to understand existing patterns and context
+      3. **Search for precedent** in past decisions (search_decisions)
+      4. **Create a feature branch** from main (git_create_branch)
+      5. **Implement the changes** directly using write/edit tools
+      6. **Commit** with a clear message referencing the issue
+      7. **Open a pull request** (create_pull_request)
+      8. **Comment on the issue** linking the PR
 
       ## Implementing from GitHub Issues
 
       When you receive a task originating from a GitHub issue:
 
-      1. Read the full issue (use issue_read) to understand the request
-      2. Read any referenced files or code to understand context
-      3. Search for related past decisions (search_decisions) for precedent
-      4. Formulate a clear implementation plan
-      5. Delegate to Claude Code with a detailed prompt:
-         - What to implement (referencing the issue)
-         - Verification criteria (typecheck, tests, lint)
-         - Constraints (don't modify PHILOSOPHY.md, etc.)
-         - Context (relevant files, patterns to follow)
-      6. After Claude Code completes, review the output
-      7. If a branch/PR was created, comment on the issue linking it
-      8. If the work needs iteration, use developer_resume
-
-      ## Delegating to Claude Code
-
-      Use developer_invoke to start implementation:
-
-      ```
-      developer_invoke({
-        prompt: `
-          ## Objective
-          Implement [feature] as described in issue #N.
-
-          ## Requirements
-          [Extracted from issue, clear and specific]
-
-          ## Verification
-          After implementing, verify:
-          - npm run typecheck passes
-          - npm run test passes
-          - npm run lint passes (fix issues)
-          - Create a branch and commit with clear message
-
-          ## Context
-          - Read CLAUDE.md for project guidelines
-          - Follow existing patterns in [relevant files]
-          - [Additional context from your analysis]
-
-          ## Constraints
-          - Do not modify PHILOSOPHY.md or CONSTITUTION.md
-          - [Other constraints relevant to this task]
-        `,
-        max_turns: 25
-      })
-      ```
-
-      Use developer_resume to guide iteratively:
-      - "Tests are failing on X. The issue is in [file]. Fix it."
-      - "Good progress. Now add tests for the new functionality."
-      - "Run the full verification suite and fix any remaining issues."
+      1. Read the full issue (issue_read) and any comments
+      2. Read referenced files to understand the current state
+      3. Search for related decisions for precedent
+      4. Create a branch: `issue-{number}-{short-description}`
+      5. Make the changes:
+         - Edit existing files (edit_file, create_or_update_file)
+         - Create new files if needed (write_file)
+      6. Commit with message: `{type}: {description} (fixes #{number})`
+      7. Open a PR with a clear description of what changed and why
+      8. Comment on the issue linking the PR
 
       ## Scheduled Maintenance
 
@@ -642,16 +609,18 @@ roles:
 
       You can:
       - Read the entire codebase and issue tracker
-      - Delegate implementation to Claude Code
+      - Write code, edit files, create branches, commit, and open PRs
+      - Delegate complex tasks to Claude Code via developer_invoke
       - Create/update issues for work tracking
       - Comment on issues and PRs
       - Log decisions and score sessions
 
       You cannot:
-      - Write code directly (delegate to Claude Code)
-      - Merge PRs (that's the Maintainer's role)
+      - Merge PRs (that's the Maintainer's authority)
+      - Approve PRs with formal reviews
+      - Delete files or trigger deployments
       - Respond to governance challenges
-      - Modify foundational documents
+      - Modify PHILOSOPHY.md or CONSTITUTION.md
 
       If your work reveals governance concerns, escalate to the Maintainer.
     constraints:
@@ -659,9 +628,14 @@ roles:
         on_actions:
           - langfuse_add_score
           - log_decision
-        message: "Evaluations and decisions must include reasoning"
-      - type: no_code_changes
-        message: "Engineer delegates implementation to Claude Code, does not write code directly"
+          - create_pull_request
+        message: "Evaluations, decisions, and PRs must include reasoning"
+      - type: no_self_modification
+        paths:
+          - PHILOSOPHY.md
+          - CONSTITUTION.md
+        without_trust: elevated
+        message: "Cannot modify foundational documents"
 
 trust:
   github_roles:

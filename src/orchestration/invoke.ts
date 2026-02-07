@@ -415,7 +415,7 @@ export class AgentInvoker {
           cache_control: { type: 'ephemeral' as const },
         };
         const response = await this.anthropic.messages.create({
-          model: 'claude-opus-4-6-20260205',
+          model: 'claude-opus-4-6',
           max_tokens: 8192,
           system: [systemBlock] as unknown as Anthropic.Messages.TextBlockParam[],
           messages,
