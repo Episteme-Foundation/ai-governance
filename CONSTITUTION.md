@@ -243,6 +243,7 @@ This bootstrap decision establishes the framework through which all subsequent d
 **Roles Configured**:
 - Maintainer: Full governance authority
 - Reception: Public interface
+- Engineer: Implementation and self-improvement
 
 **MCP Servers**:
 - Decision Log Server

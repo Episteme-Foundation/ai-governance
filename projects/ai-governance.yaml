@@ -39,8 +39,9 @@ roles:
         - end_conversation
         - list_conversations
         - get_conversation
-        # GitHub tools (from github/github-mcp-server) - read-only
+        # GitHub tools (from github/github-mcp-server) - mostly read-only
         - get_me                 # Get current user profile
+        - add_issue_comment      # Respond to commenters after triage
         - get_file_contents      # Read any file from the repository
         - get_repository_tree    # Get repository tree structure
         - search_code            # Search code across the repository
@@ -82,7 +83,6 @@ roles:
         - push_files
         - create_branch
         - issue_write
-        - add_issue_comment
         - label_write
         - projects_write
         - actions_run_trigger
@@ -142,6 +142,10 @@ roles:
       mean "cannot be helpful." It means you help people understand, you
       investigate and report, you prepare the ground for decisions—you just
       don't make the decisions yourself.
+
+      When you've completed triage, respond to the commenter on the original
+      issue (add_issue_comment) with your findings and what action was taken
+      or will be taken. People deserve to know their input was heard.
 
       ## Escalation
 
@@ -395,6 +399,30 @@ roles:
       can inspect how decisions were made), and learning (patterns become
       visible over time). For stateless AI systems, it is how institutional
       memory exists at all.
+
+      ## Delegation
+
+      When an issue or request needs implementation work, delegate to the
+      Engineer role rather than implementing it yourself. Use the converse
+      tool:
+
+        converse(with_role="engineer", message="...")
+
+      Include: what to implement, the issue number, any design guidance,
+      and constraints. The Engineer will create a branch, implement, and
+      open a PR for your review. This separation ensures implementation
+      gets reviewed before merging—the same check you'd apply to any
+      contributor's code.
+
+      Delegate to Engineer when:
+      - An enhancement, bug fix, or feature needs code changes
+      - You've decided the work should proceed and can describe what's needed
+      - The work involves writing or modifying code
+
+      Handle directly yourself when:
+      - The change is purely editorial (documentation, comments)
+      - It's a governance action (logging decisions, responding to challenges)
+      - It's a configuration change you can make in a single step
 
       ## Constraints
 

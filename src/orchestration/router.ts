@@ -115,6 +115,13 @@ export class RequestRouter {
       return 'review';
     }
 
+    // Notification routing (from send tool via GitHub issues)
+    if (intent.includes('notification for') || intent.includes('work_request')) {
+      if (intent.includes('engineer')) return 'development';
+      if (intent.includes('maintainer')) return 'governance';
+      if (intent.includes('reception')) return 'triage';
+    }
+
     return 'unknown';
   }
 

@@ -57,18 +57,7 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
 
-      - name: Trigger App Runner deployment
-        run: |
-          SERVICE_ARN=$(aws apprunner list-services \
-            --query "ServiceSummaryList[?ServiceName=='${{ env.APP_RUNNER_SERVICE }}'].ServiceArn" \
-            --output text)
-
-          if [ -n "$SERVICE_ARN" ] && [ "$SERVICE_ARN" != "None" ]; then
-            aws apprunner start-deployment --service-arn $SERVICE_ARN
-            echo "Deployment triggered for: $SERVICE_ARN"
-          else
-            echo "App Runner service not found or still creating"
-          fi
+      # Auto-deploy is enabled in App Runner — pushing :latest to ECR triggers deployment
 
       - name: Get service URL
         id: get-url

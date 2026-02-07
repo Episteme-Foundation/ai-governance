@@ -131,7 +131,27 @@ function handleIssue(
   const title = issue?.title as string || 'Untitled issue';
 
   switch (event.action) {
-    case 'opened':
+    case 'opened': {
+      // Check for notification labels (from send tool) on new issues
+      const issueLabels = (issue?.labels as Array<Record<string, unknown>> | undefined)?.map(
+        (l) => (l.name as string)?.toLowerCase() || ''
+      ) || [];
+      const notifyLabel = issueLabels.find((l) => l.startsWith('notify:'));
+
+      if (notifyLabel) {
+        const targetRole = notifyLabel.replace('notify:', '');
+        const typeLabel = issueLabels.find((l) => l.startsWith('type:'));
+        const notifType = typeLabel?.replace('type:', '') || 'notification';
+        return {
+          shouldProcess: true,
+          request: createGovernanceRequest(
+            event,
+            `Handle ${notifType} for ${targetRole}: issue #${issueNumber} "${title}"`,
+            projectId
+          ),
+        };
+      }
+
       return {
         shouldProcess: true,
         request: createGovernanceRequest(
@@ -140,6 +160,7 @@ function handleIssue(
           projectId
         ),
       };
+    }
 
     case 'reopened':
       return {
@@ -179,6 +200,19 @@ function handleIssue(
           request: createGovernanceRequest(
             event,
             `Evaluate issue #${issueNumber}: "${title}" — labeled "${label}", assess priority and next steps`,
+            projectId
+          ),
+        };
+      }
+
+      // Notification labels route to target role (from send tool)
+      if (labelLower.startsWith('notify:')) {
+        const targetRole = labelLower.replace('notify:', '');
+        return {
+          shouldProcess: true,
+          request: createGovernanceRequest(
+            event,
+            `Handle notification for ${targetRole}: issue #${issueNumber} "${title}"`,
             projectId
           ),
         };

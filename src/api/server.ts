@@ -20,8 +20,16 @@ declare module 'fastify' {
   }
 }
 
+interface RequestStatus {
+  status: 'processing' | 'completed' | 'error';
+  startedAt: string;
+  completedAt?: string;
+  error?: string;
+}
+
 export class GovernanceServer {
   private app: FastifyInstance;
+  private activeRequests = new Map<string, RequestStatus>();
 
   constructor(
     private readonly trustClassifier: TrustClassifier,
@@ -133,6 +141,18 @@ export class GovernanceServer {
       }
     });
 
+    // Request status endpoint
+    this.app.get<{
+      Params: { id: string };
+    }>('/api/request/:id/status', async (request, reply) => {
+      const status = this.activeRequests.get(request.params.id);
+      if (!status) {
+        reply.status(404);
+        return { error: 'Request not found or expired' };
+      }
+      return { request_id: request.params.id, ...status };
+    });
+
     // GitHub webhook endpoint
     this.app.post('/api/webhooks/github', async (request, reply) => {
       const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
@@ -221,41 +241,16 @@ export class GovernanceServer {
         role: role.name,
       }, 'Routed to role');
 
-      // Invoke the agent
-      try {
-        // Refresh GitHub token before each invocation (tokens expire after 1 hour)
-        if (this.refreshGitHub) {
-          await this.refreshGitHub();
-        }
+      // Fire off background processing — agent actions (comments, PRs) ARE the output
+      this.processInBackground(governanceRequest, role, projectConfig);
 
-        const response = await this.invoker.invoke(governanceRequest, role, projectConfig);
-
-        this.app.log.info({
-          requestId: governanceRequest.id,
-          responseLength: response.length,
-        }, 'Agent completed');
-
-        return {
-          status: 'completed',
-          request_id: governanceRequest.id,
-          trust_level: governanceRequest.trust,
-          intent: governanceRequest.intent,
-          project: projectId,
-          role: role.name,
-          response,
-        };
-      } catch (error) {
-        this.app.log.error({
-          requestId: governanceRequest.id,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        }, 'Agent invocation failed');
-
-        return {
-          status: 'error',
-          request_id: governanceRequest.id,
-          error: error instanceof Error ? error.message : 'Agent invocation failed',
-        };
-      }
+      return {
+        status: 'accepted',
+        request_id: governanceRequest.id,
+        intent: governanceRequest.intent,
+        project: projectId,
+        role: role.name,
+      };
     });
 
     // Admin endpoint (requires authentication via API key header)
@@ -310,7 +305,38 @@ export class GovernanceServer {
         };
       }
 
-      return await this.invokeForProject(governanceRequest, projectConfig, targetRole, reply);
+      // Resolve the role before returning
+      let role;
+      if (targetRole) {
+        role = projectConfig.roles.find(
+          (r) => r.name.toLowerCase() === targetRole.toLowerCase()
+        );
+        if (!role) {
+          reply.status(400);
+          return {
+            request_id: governanceRequest.id,
+            status: 'error',
+            error: `Role "${targetRole}" not found. Available: ${projectConfig.roles.map((r) => r.name).join(', ')}`,
+          };
+        }
+      } else {
+        role = this.router.route(governanceRequest, projectConfig);
+      }
+
+      this.app.log.info({
+        requestId: governanceRequest.id,
+        role: role.name,
+      }, 'Admin request routed');
+
+      // Fire off background processing
+      this.processInBackground(governanceRequest, role, projectConfig);
+
+      reply.status(202);
+      return {
+        status: 'accepted',
+        request_id: governanceRequest.id,
+        role: role.name,
+      };
     });
 
     // Scheduled task endpoint (triggered by cron/GitHub Actions)
@@ -391,62 +417,50 @@ export class GovernanceServer {
   }
 
   /**
-   * Invoke an agent for a project, optionally targeting a specific role
+   * Process a governance request in the background.
+   * Agent actions (comments, PRs, merges) ARE the output — no HTTP response needed.
    */
-  private async invokeForProject(
+  private processInBackground(
     request: GovernanceRequest,
-    project: import('../types').ProjectConfig,
-    targetRole: string | undefined,
-    reply: import('fastify').FastifyReply
-  ) {
-    // If a specific role is requested, use it directly
-    let role;
-    if (targetRole) {
-      role = project.roles.find(
-        (r) => r.name.toLowerCase() === targetRole.toLowerCase()
-      );
-      if (!role) {
-        reply.status(400);
-        return {
-          request_id: request.id,
-          status: 'error',
-          error: `Role "${targetRole}" not found. Available: ${project.roles.map((r) => r.name).join(', ')}`,
-        };
-      }
-    } else {
-      role = this.router.route(request, project);
-    }
+    role: import('../types').RoleDefinition,
+    project: import('../types').ProjectConfig
+  ): void {
+    this.trackRequest(request.id, 'processing');
 
-    this.app.log.info({
-      requestId: request.id,
-      role: role.name,
-    }, 'Admin request routed');
-
-    try {
+    const run = async () => {
       if (this.refreshGitHub) {
         await this.refreshGitHub();
       }
-
       const response = await this.invoker.invoke(request, role, project);
+      this.app.log.info({
+        requestId: request.id,
+        responseLength: response.length,
+      }, 'Background processing completed');
+      this.trackRequest(request.id, 'completed');
+    };
 
-      return {
-        request_id: request.id,
-        status: 'completed',
-        trust_level: request.trust,
-        role: role.name,
-        response,
-      };
-    } catch (error) {
+    run().catch((error) => {
       this.app.log.error({
         requestId: request.id,
         error: error instanceof Error ? error.message : 'Unknown error',
-      }, 'Admin request agent invocation failed');
+      }, 'Background processing failed');
+      this.trackRequest(request.id, 'error', error instanceof Error ? error.message : 'Unknown error');
+    });
+  }
 
-      return {
-        status: 'error',
-        request_id: request.id,
-        error: error instanceof Error ? error.message : 'Agent invocation failed',
-      };
+  private trackRequest(id: string, status: RequestStatus['status'], error?: string): void {
+    const existing = this.activeRequests.get(id);
+    if (status === 'processing') {
+      this.activeRequests.set(id, { status, startedAt: new Date().toISOString() });
+      // Auto-expire after 1 hour
+      setTimeout(() => this.activeRequests.delete(id), 60 * 60 * 1000);
+    } else {
+      this.activeRequests.set(id, {
+        status,
+        startedAt: existing?.startedAt ?? new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        ...(error && { error }),
+      });
     }
   }
 
