@@ -97,7 +97,9 @@ export class RequestRouter {
         intent.includes('governance') ||
         intent.includes('decision') ||
         intent.includes('policy') ||
-        intent.includes('constitutional')) {
+        intent.includes('constitutional') ||
+        intent.includes('evaluate') ||
+        intent.includes('assess priority')) {
       return 'governance';
     }
 
@@ -177,22 +179,23 @@ export class RequestRouter {
   }
 
   /**
-   * Check if labels indicate development work
+   * Check if labels indicate authorized development work
+   *
+   * Only explicit authorization labels trigger development routing.
+   * Categorization labels (bug, enhancement, feature) indicate what
+   * an issue IS, not that it's been approved for development. Those
+   * go through governance evaluation first.
    */
   private hasDevelopmentLabel(labels: string[]): boolean {
-    const developmentLabels = [
+    const authorizationLabels = [
       'ready-for-development',
       'approved-for-development',
       'implement',
-      'enhancement',
-      'feature',
-      'bug',
       'engineer',
-      'development',
     ];
 
     return labels.some((label) =>
-      developmentLabels.some((devLabel) => label.includes(devLabel))
+      authorizationLabels.some((devLabel) => label.includes(devLabel))
     );
   }
 

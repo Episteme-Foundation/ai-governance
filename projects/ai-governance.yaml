@@ -27,6 +27,7 @@ roles:
     purpose: Handle public input and triage substantive matters
     accepts_trust:
       - anonymous
+      - contributor
     tools:
       allowed:
         # Governance tools (custom)

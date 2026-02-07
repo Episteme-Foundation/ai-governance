@@ -170,13 +170,15 @@ function handleIssue(
         };
       }
 
-      // Bug and enhancement labels also trigger development
+      // Categorization labels (bug, enhancement, feature) go to maintainer
+      // for evaluation — these indicate what the issue IS, not authorization
+      // to implement. The maintainer decides priority and delegates to engineer.
       if (labelLower === 'bug' || labelLower === 'enhancement' || labelLower === 'feature') {
         return {
           shouldProcess: true,
           request: createGovernanceRequest(
             event,
-            `Implement ${labelLower} issue #${issueNumber}: "${title}"`,
+            `Evaluate issue #${issueNumber}: "${title}" — labeled "${label}", assess priority and next steps`,
             projectId
           ),
         };
@@ -293,10 +295,22 @@ function handleIssueComment(
     };
   }
 
-  // For issues, only process if explicitly triggered
+  // For issues, process substantive comments through reception for triage
+  // Short comments (reactions, acknowledgments) are skipped
+  if (body.length < 20) {
+    return {
+      shouldProcess: false,
+      skipReason: 'Comment too short for substantive review',
+    };
+  }
+
   return {
-    shouldProcess: false,
-    skipReason: 'Issue comment without governance trigger',
+    shouldProcess: true,
+    request: createGovernanceRequest(
+      event,
+      `Triage comment on issue #${issueNumber}`,
+      projectId
+    ),
   };
 }
 
