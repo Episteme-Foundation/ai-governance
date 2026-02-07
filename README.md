@@ -202,20 +202,13 @@ The framework doesn't prescribe specific organizational structures. Projects cho
 
 ---
 
-## Development Status
+## Current Status
 
-- [x] Core philosophy document
-- [x] Architecture design
-- [x] Self-governance constitution
-- [x] Pattern documentation
-- [x] Application implementation (TypeScript orchestration)
-- [x] AWS infrastructure (RDS PostgreSQL with pgvector, App Runner)
-- [x] Deployment documentation
-- [x] GitHub App integration (webhook receiving events)
-- [x] CI/CD pipeline (GitHub Actions → App Runner)
-- [x] Full agent loop implementation
-- [x] Unified conversation system (agent-to-agent communication)
-- [x] Langfuse observability integration
+The core framework is operational and self-hosting: this project is governed by its own AI governance system. The foundational philosophy, project constitution, organizational patterns, and decision logging are all in place. The TypeScript orchestration application handles webhook events from GitHub, routes them through role-based agents (Maintainer and Reception), and records governance decisions with full reasoning.
+
+Infrastructure includes AWS deployment (RDS PostgreSQL with pgvector, App Runner), a CI/CD pipeline via GitHub Actions, GitHub App integration for receiving repository events, a unified conversation system for agent-to-agent communication, and Langfuse-based observability.
+
+The project is in active development. Current focus areas include improving agent responsiveness, expanding documentation, and refining governance processes based on real-world experience. See the [open issues](https://github.com/Episteme-Foundation/ai-governance/issues) for specific work in progress.
 
 ---
 
