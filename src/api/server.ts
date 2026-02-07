@@ -8,7 +8,7 @@ import {
   parseWebhookEvent,
   handleWebhookEvent,
 } from './webhooks';
-import { loadProjectByRepo } from '../config/load-project';
+import { loadProjectByRepo, loadProjectConfig } from '../config/load-project';
 
 /**
  * Fastify server for AI Governance API
@@ -84,14 +84,53 @@ export class GovernanceServer {
       // Classify trust level
       governanceRequest.trust = this.trustClassifier.classify(governanceRequest);
 
-      // TODO: Load project config, route to role, invoke agent
-      // For now, return a placeholder
+      // Load project configuration
+      const projectConfig = await loadProjectByRepo(project_id);
+      if (!projectConfig) {
+        reply.status(404);
+        return {
+          request_id: governanceRequest.id,
+          status: 'error',
+          error: `No project configuration found for: ${project_id}`,
+        };
+      }
 
-      return {
-        request_id: governanceRequest.id,
-        status: 'received',
-        trust_level: governanceRequest.trust,
-      };
+      // Route to appropriate role
+      const role = this.router.route(governanceRequest, projectConfig);
+
+      this.app.log.info({
+        requestId: governanceRequest.id,
+        role: role.name,
+        trust: governanceRequest.trust,
+      }, 'API request routed');
+
+      // Invoke the agent
+      try {
+        if (this.refreshGitHub) {
+          await this.refreshGitHub();
+        }
+
+        const response = await this.invoker.invoke(governanceRequest, role, projectConfig);
+
+        return {
+          request_id: governanceRequest.id,
+          status: 'completed',
+          trust_level: governanceRequest.trust,
+          role: role.name,
+          response,
+        };
+      } catch (error) {
+        this.app.log.error({
+          requestId: governanceRequest.id,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        }, 'API request agent invocation failed');
+
+        return {
+          status: 'error',
+          request_id: governanceRequest.id,
+          error: error instanceof Error ? error.message : 'Agent invocation failed',
+        };
+      }
     });
 
     // GitHub webhook endpoint
@@ -219,15 +258,25 @@ export class GovernanceServer {
       }
     });
 
-    // Admin endpoint (requires authentication)
+    // Admin endpoint (requires authentication via API key header)
     this.app.post<{
       Body: {
         project_id: string;
         intent: string;
+        role?: string;
         payload?: Record<string, unknown>;
       };
     }>('/admin/request', async (request, reply) => {
-      const { project_id, intent, payload = {} } = request.body;
+      // Validate admin API key
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      const { project_id, intent, role: targetRole, payload = {} } = request.body;
 
       const governanceRequest: GovernanceRequest = {
         id: crypto.randomUUID(),
@@ -242,14 +291,163 @@ export class GovernanceServer {
         payload,
       };
 
-      // TODO: Authenticate admin request
-      // TODO: Load project, route, invoke
+      // Load project configuration - try by repo ID first, then by project ID
+      let projectConfig = await loadProjectByRepo(project_id);
+      if (!projectConfig) {
+        try {
+          projectConfig = loadProjectConfig(project_id);
+        } catch {
+          // Not found by either method
+        }
+      }
+
+      if (!projectConfig) {
+        reply.status(404);
+        return {
+          request_id: governanceRequest.id,
+          status: 'error',
+          error: `No project configuration found for: ${project_id}`,
+        };
+      }
+
+      return await this.invokeForProject(governanceRequest, projectConfig, targetRole, reply);
+    });
+
+    // Scheduled task endpoint (triggered by cron/GitHub Actions)
+    this.app.post<{
+      Body: {
+        project_id: string;
+        task: string;
+        payload?: Record<string, unknown>;
+      };
+    }>('/api/scheduled', async (request, reply) => {
+      // Validate webhook secret or admin key for scheduled tasks
+      const authKey = request.headers['x-admin-key'] as string ||
+                      request.headers['x-webhook-key'] as string;
+      const expectedKey = process.env.ADMIN_API_KEY || process.env.SCHEDULED_TASK_KEY;
+
+      if (expectedKey && authKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Unauthorized' };
+      }
+
+      const { project_id, task, payload = {} } = request.body;
+
+      const governanceRequest: GovernanceRequest = {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        trust: 'elevated',
+        source: {
+          channel: 'admin_cli',
+          identity: 'scheduler',
+        },
+        project: project_id,
+        intent: task,
+        payload: { ...payload, scheduled: true, trigger: 'schedule' },
+      };
+
+      // Load project configuration
+      const projectConfig = await loadProjectByRepo(project_id);
+      if (!projectConfig) {
+        reply.status(404);
+        return { error: `No project configuration found for: ${project_id}` };
+      }
+
+      // Route - scheduled tasks go to engineer/maintainer based on intent
+      const role = this.router.route(governanceRequest, projectConfig);
+
+      this.app.log.info({
+        requestId: governanceRequest.id,
+        task,
+        role: role.name,
+      }, 'Scheduled task routed');
+
+      try {
+        if (this.refreshGitHub) {
+          await this.refreshGitHub();
+        }
+
+        const response = await this.invoker.invoke(governanceRequest, role, projectConfig);
+
+        return {
+          request_id: governanceRequest.id,
+          status: 'completed',
+          role: role.name,
+          response,
+        };
+      } catch (error) {
+        this.app.log.error({
+          requestId: governanceRequest.id,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        }, 'Scheduled task failed');
+
+        return {
+          status: 'error',
+          request_id: governanceRequest.id,
+          error: error instanceof Error ? error.message : 'Scheduled task failed',
+        };
+      }
+    });
+  }
+
+  /**
+   * Invoke an agent for a project, optionally targeting a specific role
+   */
+  private async invokeForProject(
+    request: GovernanceRequest,
+    project: import('../types').ProjectConfig,
+    targetRole: string | undefined,
+    reply: import('fastify').FastifyReply
+  ) {
+    // If a specific role is requested, use it directly
+    let role;
+    if (targetRole) {
+      role = project.roles.find(
+        (r) => r.name.toLowerCase() === targetRole.toLowerCase()
+      );
+      if (!role) {
+        reply.status(400);
+        return {
+          request_id: request.id,
+          status: 'error',
+          error: `Role "${targetRole}" not found. Available: ${project.roles.map((r) => r.name).join(', ')}`,
+        };
+      }
+    } else {
+      role = this.router.route(request, project);
+    }
+
+    this.app.log.info({
+      requestId: request.id,
+      role: role.name,
+    }, 'Admin request routed');
+
+    try {
+      if (this.refreshGitHub) {
+        await this.refreshGitHub();
+      }
+
+      const response = await this.invoker.invoke(request, role, project);
 
       return {
-        request_id: governanceRequest.id,
-        status: 'received',
+        request_id: request.id,
+        status: 'completed',
+        trust_level: request.trust,
+        role: role.name,
+        response,
       };
-    });
+    } catch (error) {
+      this.app.log.error({
+        requestId: request.id,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }, 'Admin request agent invocation failed');
+
+      return {
+        status: 'error',
+        request_id: request.id,
+        error: error instanceof Error ? error.message : 'Agent invocation failed',
+      };
+    }
   }
 
   async start(port: number = 3000): Promise<void> {

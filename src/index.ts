@@ -28,6 +28,7 @@ import { DecisionLogServer } from './mcp/decision-log/server';
 import { ChallengeServer } from './mcp/challenge/server';
 import { WikiServer } from './mcp/wiki/server';
 import { LangfuseServer } from './mcp/langfuse/server';
+import { DeveloperServer } from './mcp/developer/server';
 import { isLangfuseEnabled, shutdownLangfuse } from './observability';
 
 /**
@@ -122,8 +123,15 @@ async function main() {
         name: 'github',
         type: 'stdio',
         stdio: {
-          command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-github'],
+          command: 'docker',
+          args: [
+            'run',
+            '-i',
+            '--rm',
+            '-e',
+            'GITHUB_PERSONAL_ACCESS_TOKEN',
+            'ghcr.io/github/github-mcp-server',
+          ],
           env: {
             GITHUB_PERSONAL_ACCESS_TOKEN: token,
           },
@@ -148,13 +156,18 @@ async function main() {
     console.log('Langfuse enabled - agents can query their own operations');
   }
 
+  // Developer server for Claude Code delegation
+  const developerServer = new DeveloperServer(process.cwd());
+  console.log('Developer server initialized - agents can delegate to Claude Code');
+
   // 6. MCP Executor (routes tool calls to appropriate server)
   const mcpExecutor = new MCPExecutor(
     mcpClient,
     decisionLogServer,
     challengeServer,
     wikiServer,
-    langfuseServer
+    langfuseServer,
+    developerServer
   );
 
   // 7. Orchestration

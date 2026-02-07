@@ -149,10 +149,40 @@ function handleIssue(
         ),
       };
 
-    case 'labeled':
+    case 'labeled': {
       const label = (payload.label as Record<string, unknown>)?.name as string;
-      if (label?.toLowerCase().includes('governance') ||
-          label?.toLowerCase().includes('escalation')) {
+      const labelLower = label?.toLowerCase() || '';
+
+      // Development labels trigger the engineer agent
+      if (labelLower.includes('ready-for-development') ||
+          labelLower.includes('approved-for-development') ||
+          labelLower.includes('implement') ||
+          labelLower === 'engineer') {
+        return {
+          shouldProcess: true,
+          request: createGovernanceRequest(
+            event,
+            `Implement issue #${issueNumber}: "${title}" — assigned for development via label "${label}"`,
+            projectId
+          ),
+        };
+      }
+
+      // Bug and enhancement labels also trigger development
+      if (labelLower === 'bug' || labelLower === 'enhancement' || labelLower === 'feature') {
+        return {
+          shouldProcess: true,
+          request: createGovernanceRequest(
+            event,
+            `Implement ${labelLower} issue #${issueNumber}: "${title}"`,
+            projectId
+          ),
+        };
+      }
+
+      // Governance labels go to maintainer
+      if (labelLower.includes('governance') ||
+          labelLower.includes('escalation')) {
         return {
           shouldProcess: true,
           request: createGovernanceRequest(
@@ -162,10 +192,24 @@ function handleIssue(
           ),
         };
       }
+
       return {
         shouldProcess: false,
-        skipReason: `Non-governance label added: ${label}`,
+        skipReason: `Non-actionable label added: ${label}`,
       };
+    }
+
+    case 'assigned': {
+      const assignee = (payload.assignee as Record<string, unknown>)?.login as string;
+      return {
+        shouldProcess: true,
+        request: createGovernanceRequest(
+          event,
+          `Implement issue #${issueNumber}: "${title}" — assigned to ${assignee || 'engineer'}`,
+          projectId
+        ),
+      };
+    }
 
     default:
       return {

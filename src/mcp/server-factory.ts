@@ -39,15 +39,21 @@ export function createStandardServerConfigs(env: MCPEnvironment): MCPServerConfi
         },
       });
     } else {
-      // Spawn local GitHub MCP server
-      // Note: Using the deprecated but still functional npm package
-      // TODO: Migrate to github/github-mcp-server when available as npm
+      // Spawn local GitHub MCP server via Docker
+      // Using the official GitHub MCP server: https://github.com/github/github-mcp-server
       configs.push({
         name: 'github',
         type: 'stdio',
         stdio: {
-          command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-github'],
+          command: 'docker',
+          args: [
+            'run',
+            '-i',
+            '--rm',
+            '-e',
+            'GITHUB_PERSONAL_ACCESS_TOKEN',
+            'ghcr.io/github/github-mcp-server',
+          ],
           env: {
             GITHUB_PERSONAL_ACCESS_TOKEN: env.githubToken,
           },
