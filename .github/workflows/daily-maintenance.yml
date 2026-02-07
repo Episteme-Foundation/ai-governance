@@ -1,0 +1,77 @@
+name: Daily Maintenance
+
+on:
+  schedule:
+    # Run daily at 08:00 UTC
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Override the default maintenance task'
+        required: false
+        type: string
+      role:
+        description: 'Target role (engineer or maintainer)'
+        required: false
+        default: 'engineer'
+        type: choice
+        options:
+          - engineer
+          - maintainer
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger maintenance task
+        env:
+          SERVICE_URL: ${{ vars.SERVICE_URL || 'https://your-service-url.com' }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+        run: |
+          TASK="${{ inputs.task || 'Review open issues and the project roadmap. Pick the highest-priority actionable task that is ready for development and implement it. After implementation, comment on the issue with your results.' }}"
+          ROLE="${{ inputs.role || 'engineer' }}"
+
+          echo "Triggering maintenance task..."
+          echo "Role: $ROLE"
+          echo "Task: $TASK"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "$SERVICE_URL/api/scheduled" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Key: $ADMIN_API_KEY" \
+            -d "{
+              \"project_id\": \"Episteme-Foundation/ai-governance\",
+              \"task\": \"$TASK\"
+            }")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::error::Maintenance task failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+  review:
+    runs-on: ubuntu-latest
+    needs: maintenance
+    if: always()
+    steps:
+      - name: Check maintenance results
+        env:
+          SERVICE_URL: ${{ vars.SERVICE_URL || 'https://your-service-url.com' }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+        run: |
+          echo "Triggering maintainer review of recent work..."
+
+          curl -s -X POST "$SERVICE_URL/admin/request" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Key: $ADMIN_API_KEY" \
+            -d '{
+              "project_id": "Episteme-Foundation/ai-governance",
+              "intent": "Review recent engineer activity. Check if any PRs need review, if any implementations need feedback, and if the roadmap needs updating.",
+              "role": "maintainer"
+            }'

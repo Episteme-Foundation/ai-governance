@@ -415,11 +415,13 @@ export class AgentInvoker {
           cache_control: { type: 'ephemeral' as const },
         };
         const response = await this.anthropic.messages.create({
-          model: 'claude-opus-4-5-20251101',
+          model: 'claude-opus-4-6-20260205',
           max_tokens: 8192,
           system: [systemBlock] as unknown as Anthropic.Messages.TextBlockParam[],
           messages,
           tools: tools.length > 0 ? tools : undefined,
+        }, {
+          timeout: 5 * 60 * 1000, // 5 minute timeout per API call
         });
         const apiDurationMs = Date.now() - apiStartTime;
 
