@@ -23,12 +23,13 @@ import { MCPExecutor } from './orchestration/mcp-executor';
 import { GovernanceServer } from './api/server';
 import { loadSecrets } from './config/load-secrets';
 import { createMCPClientManager } from './mcp/server-factory';
-import { getInstallationToken } from './mcp/github/auth';
+// getInstallationToken no longer needed here — custom GitHubServer handles auth internally
 import { DecisionLogServer } from './mcp/decision-log/server';
 import { ChallengeServer } from './mcp/challenge/server';
 import { WikiServer } from './mcp/wiki/server';
 import { LangfuseServer } from './mcp/langfuse/server';
 import { DeveloperServer } from './mcp/developer/server';
+import { GitHubServer } from './mcp/github/server';
 import { isLangfuseEnabled, shutdownLangfuse } from './observability';
 
 /**
@@ -110,39 +111,11 @@ async function main() {
     allowedPaths: [process.cwd()],
   });
 
-  // Function to refresh GitHub connection with a fresh installation token
-  // Called before each agent invocation since tokens expire after 1 hour
+  // GitHub token refresh is now handled automatically by the custom GitHubServer
+  // (auth.ts caches tokens and refreshes when they expire within 60s)
+  // Keep this as a no-op for GovernanceServer compatibility
   const refreshGitHub = async (): Promise<void> => {
-    if (!githubOwner || !githubRepo) {
-      return; // GitHub not configured
-    }
-
-    try {
-      const token = await getInstallationToken(githubOwner, githubRepo);
-      await mcpClient.reconnect({
-        name: 'github',
-        type: 'stdio',
-        stdio: {
-          command: 'docker',
-          args: [
-            'run',
-            '-i',
-            '--rm',
-            '-e',
-            'GITHUB_PERSONAL_ACCESS_TOKEN',
-            'ghcr.io/github/github-mcp-server',
-          ],
-          env: {
-            GITHUB_PERSONAL_ACCESS_TOKEN: token,
-          },
-        },
-      });
-    } catch (error) {
-      console.warn(
-        'Failed to refresh GitHub connection:',
-        error instanceof Error ? error.message : 'Unknown error'
-      );
-    }
+    // No-op: custom GitHubServer handles token refresh internally via auth.ts cache
   };
 
   // Custom governance servers
@@ -160,6 +133,15 @@ async function main() {
   const developerServer = new DeveloperServer(process.cwd());
   console.log('Developer server initialized - agents can delegate to Claude Code');
 
+  // Custom GitHub server (uses GitHub App auth from auth.ts — no Docker/Python needed)
+  let githubServer: GitHubServer | undefined;
+  if (githubOwner && githubRepo) {
+    githubServer = new GitHubServer(githubOwner, githubRepo);
+    console.log(`GitHub server initialized for ${githubOwner}/${githubRepo}`);
+  } else {
+    console.warn('GitHub server not initialized - GITHUB_REPOSITORY not set');
+  }
+
   // 6. MCP Executor (routes tool calls to appropriate server)
   const mcpExecutor = new MCPExecutor(
     mcpClient,
@@ -167,7 +149,8 @@ async function main() {
     challengeServer,
     wikiServer,
     langfuseServer,
-    developerServer
+    developerServer,
+    githubServer
   );
 
   // 7. Orchestration

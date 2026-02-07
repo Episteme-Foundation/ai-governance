@@ -61,9 +61,14 @@ export class GovernanceServer {
   }
 
   private setupRoutes(): void {
-    // Health check
+    // Health check — includes version and commit for deployment verification (Issue #5)
     this.app.get('/health', async () => {
-      return { status: 'ok', timestamp: new Date().toISOString() };
+      return {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        version: process.env.npm_package_version || '0.1.0',
+        commit: process.env.GIT_COMMIT_SHA || null,
+      };
     });
 
     // Public governance request endpoint

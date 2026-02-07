@@ -5,6 +5,7 @@ import { ChallengeServer } from '../mcp/challenge/server';
 import { WikiServer } from '../mcp/wiki/server';
 import { LangfuseServer } from '../mcp/langfuse/server';
 import { DeveloperServer } from '../mcp/developer/server';
+import { GitHubServer } from '../mcp/github/server';
 
 /**
  * Tool execution result
@@ -37,7 +38,8 @@ export class MCPExecutor {
     private readonly challengeServer: ChallengeServer,
     private readonly wikiServer: WikiServer,
     private readonly langfuseServer?: LangfuseServer,
-    private readonly developerServer?: DeveloperServer
+    private readonly developerServer?: DeveloperServer,
+    private readonly githubServer?: GitHubServer
   ) {
     this.registerCustomTools();
   }
@@ -114,6 +116,17 @@ export class MCPExecutor {
         });
       }
     }
+
+    // GitHub tools (custom server using GitHub App auth)
+    if (this.githubServer) {
+      const githubTools = this.githubServer.getToolDefinitions().map((t) => t.name);
+      for (const tool of githubTools) {
+        this.customToolHandlers.set(tool, {
+          server: 'github',
+          execute: (args) => this.githubServer!.executeTool(tool, args),
+        });
+      }
+    }
   }
 
   /**
@@ -177,6 +190,9 @@ export class MCPExecutor {
     }
     if (this.developerServer) {
       allTools.push(...this.developerServer.getToolDefinitions());
+    }
+    if (this.githubServer) {
+      allTools.push(...this.githubServer.getToolDefinitions());
     }
 
     // Apply role-based filtering
