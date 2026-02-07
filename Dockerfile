@@ -7,8 +7,8 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies (legacy-peer-deps for claude-agent-sdk zod v4 vs project zod v3)
+RUN npm ci --legacy-peer-deps
 
 # Copy source
 COPY src ./src
@@ -23,7 +23,7 @@ WORKDIR /app
 
 # Install production dependencies only
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --only=production --legacy-peer-deps
 
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist

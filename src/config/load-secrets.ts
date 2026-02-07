@@ -82,6 +82,8 @@ export async function loadSecrets(): Promise<void> {
       GITHUB_APP_PRIVATE_KEY: secrets.GITHUB_APP_PRIVATE_KEY,
       GITHUB_WEBHOOK_SECRET: secrets.GITHUB_WEBHOOK_SECRET,
       GITHUB_REPOSITORY: secrets.GITHUB_REPOSITORY,
+      // Admin API key for scheduled tasks / admin endpoint
+      ADMIN_API_KEY: secrets.ADMIN_API_KEY,
       // Langfuse observability (optional)
       LANGFUSE_SECRET_KEY: secrets.LANGFUSE_SECRET_KEY,
       LANGFUSE_PUBLIC_KEY: secrets.LANGFUSE_PUBLIC_KEY,
