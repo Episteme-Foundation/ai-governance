@@ -36,12 +36,13 @@ jobs:
           echo "Task: $TASK"
 
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -X POST "$SERVICE_URL/api/scheduled" \
+            -X POST "$SERVICE_URL/admin/request" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Key: $ADMIN_API_KEY" \
             -d "{
               \"project_id\": \"Episteme-Foundation/ai-governance\",
-              \"task\": \"$TASK\"
+              \"intent\": \"$TASK\",
+              \"role\": \"$ROLE\"
             }")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)

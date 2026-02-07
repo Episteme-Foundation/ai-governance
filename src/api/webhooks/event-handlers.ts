@@ -71,7 +71,7 @@ function handlePullRequest(
         ),
       };
 
-    case 'closed':
+    case 'closed': {
       // Don't process closed PRs unless merged
       const merged = pullRequest?.merged as boolean;
       if (merged) {
@@ -88,8 +88,9 @@ function handlePullRequest(
         shouldProcess: false,
         skipReason: 'PR closed without merge',
       };
+    }
 
-    case 'edited':
+    case 'edited': {
       // Only process significant edits (title/body changes)
       const changes = payload.changes as Record<string, unknown> | undefined;
       if (changes?.title || changes?.body) {
@@ -106,6 +107,7 @@ function handlePullRequest(
         shouldProcess: false,
         skipReason: 'Minor PR edit (not title/body)',
       };
+    }
 
     default:
       return {

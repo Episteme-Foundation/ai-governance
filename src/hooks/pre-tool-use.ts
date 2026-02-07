@@ -173,8 +173,8 @@ export class PreToolUseHook {
    * Check rate limiting (placeholder)
    */
   private async checkRateLimit(
-    limit: number,
-    windowMs: number
+    _limit: number,
+    _windowMs: number
   ): Promise<boolean> {
     // TODO: Implement rate limiting using Redis
     return false;
@@ -183,7 +183,7 @@ export class PreToolUseHook {
   /**
    * Check if approval has been granted (placeholder)
    */
-  private async checkApproval(approver: string): Promise<boolean> {
+  private async checkApproval(_approver: string): Promise<boolean> {
     // TODO: Implement approval tracking
     return false;
   }

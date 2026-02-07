@@ -618,10 +618,6 @@ export class ConversationServer {
     thread: ConversationThread,
     messages: ConversationMessage[]
   ): string {
-    const otherParticipants = thread.participants
-      .filter((p) => !(p.type === 'role' && p.id === this.currentRole))
-      .map((p) => p.id);
-
     let context = `## Active Conversation\n`;
     context += `You are in a conversation with ${this.currentRole}`;
     if (thread.topic) {

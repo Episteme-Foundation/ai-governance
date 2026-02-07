@@ -1,4 +1,3 @@
-import { spawn } from 'child_process';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
@@ -6,6 +5,22 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'crypto';
+import {
+  createTrace,
+  createSpan,
+  createGeneration,
+  flushLangfuse,
+} from '../../observability/index.js';
+
+// Lazy-load the Claude Agent SDK (ESM-only module requires dynamic import)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _sdkModule: any = null;
+async function getClaudeAgentSdk(): Promise<{ query: (params: { prompt: string; options?: Record<string, unknown> }) => AsyncIterable<Record<string, unknown>> }> {
+  if (!_sdkModule) {
+    _sdkModule = await import('@anthropic-ai/claude-agent-sdk');
+  }
+  return _sdkModule;
+}
 
 /**
  * Developer session state
@@ -20,21 +35,27 @@ interface DeveloperSession {
     prompt: string;
     response: string;
     timestamp: string;
+    costUsd?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    numTurns?: number;
+    durationMs?: number;
   }>;
   workingDirectory: string;
   mcpConfig?: Record<string, unknown>;
 }
 
 /**
- * MCP Server for Developer operations via Claude Code
+ * MCP Server for Developer operations via Claude Agent SDK
  *
  * Provides tools for:
- * - Invoking Claude Code to perform development tasks
+ * - Invoking Claude Code to perform development tasks (via SDK, not CLI)
  * - Resuming sessions for iterative development
  * - Checking session status and history
  *
- * This enables our agents (particularly Evaluator) to delegate development
- * work to Claude Code while maintaining full tracing and session management.
+ * Uses the @anthropic-ai/claude-agent-sdk for a proper conversational loop
+ * with streaming, permission handling, and structured output. The engineer
+ * agent can observe Claude Code's progress and respond to questions.
  */
 export class DeveloperServer {
   private server: Server;
@@ -75,6 +96,7 @@ export class DeveloperServer {
           description:
             'Invoke Claude Code to perform a development task. Creates a new session with Claude Code ' +
             'that has full capabilities: reading/writing files, running commands, git operations, etc. ' +
+            'Uses the Claude Agent SDK for a conversational loop with streaming progress. ' +
             'Use this to delegate implementation work while retaining oversight.',
           inputSchema: {
             type: 'object',
@@ -99,6 +121,10 @@ export class DeveloperServer {
               max_turns: {
                 type: 'number',
                 description: 'Maximum number of turns before stopping (default: 20)',
+              },
+              system_prompt: {
+                type: 'string',
+                description: 'Optional system prompt to prepend to the default Claude Code prompt',
               },
             },
             required: ['prompt'],
@@ -186,6 +212,196 @@ export class DeveloperServer {
   }
 
   /**
+   * Build SDK options for a Claude Agent query
+   */
+  private buildSdkOptions(params: {
+    workingDirectory: string;
+    allowedTools?: string[];
+    maxTurns?: number;
+    systemPrompt?: string;
+    resumeSessionId?: string;
+  }): Record<string, unknown> {
+    const options: Record<string, unknown> = {
+      cwd: params.workingDirectory,
+      // Use Claude Code's built-in system prompt with optional append
+      systemPrompt: params.systemPrompt
+        ? { type: 'preset', preset: 'claude_code', append: params.systemPrompt }
+        : { type: 'preset', preset: 'claude_code' },
+      // Load project settings so CLAUDE.md is respected
+      settingSources: ['project'],
+      // Auto-accept edits for automated development work
+      permissionMode: 'acceptEdits',
+    };
+
+    if (params.allowedTools && params.allowedTools.length > 0) {
+      options.allowedTools = params.allowedTools;
+    }
+
+    if (params.maxTurns) {
+      options.maxTurns = params.maxTurns;
+    }
+
+    if (params.resumeSessionId) {
+      options.resume = params.resumeSessionId;
+    }
+
+    return options;
+  }
+
+  /**
+   * Execute a Claude Agent SDK query and collect results
+   */
+  private async executeClaudeQuery(
+    prompt: string,
+    options: Record<string, unknown>,
+    langfuseTrace?: ReturnType<typeof createTrace>
+  ): Promise<{
+    success: boolean;
+    output: string;
+    sessionId?: string;
+    costUsd?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    numTurns?: number;
+    durationMs?: number;
+    toolsUsed: string[];
+  }> {
+    const sdk = await getClaudeAgentSdk();
+    const toolsUsed: string[] = [];
+    let sessionId: string | undefined;
+    let resultOutput = '';
+    let costUsd: number | undefined;
+    let inputTokens: number | undefined;
+    let outputTokens: number | undefined;
+    let numTurns: number | undefined;
+    let durationMs: number | undefined;
+    let success = false;
+
+    const queryStartTime = Date.now();
+
+    try {
+      const queryIterator = sdk.query({ prompt, options });
+
+      for await (const message of queryIterator) {
+        const msg = message as Record<string, unknown>;
+
+        // Track session ID from init message
+        if (msg.type === 'system' && msg.subtype === 'init') {
+          sessionId = msg.session_id as string;
+
+          if (langfuseTrace) {
+            createSpan(langfuseTrace, {
+              name: 'claude-code:init',
+              input: { prompt },
+              output: {
+                model: msg.model,
+                tools: msg.tools,
+                mcpServers: msg.mcp_servers,
+              },
+              metadata: {
+                permissionMode: msg.permissionMode as string,
+                sessionId: msg.session_id as string,
+              },
+            });
+          }
+        }
+
+        // Track assistant messages for tool use
+        if (msg.type === 'assistant') {
+          const assistantMessage = msg.message as { content?: Array<Record<string, unknown>> } | undefined;
+          if (assistantMessage?.content) {
+            for (const block of assistantMessage.content) {
+              if (typeof block.name === 'string') {
+                toolsUsed.push(block.name);
+
+                if (langfuseTrace) {
+                  createSpan(langfuseTrace, {
+                    name: `claude-code:tool:${block.name}`,
+                    input: block.input,
+                    metadata: {
+                      toolUseId: block.id as string | undefined,
+                      parentToolUseId: msg.parent_tool_use_id as string | null,
+                    },
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        // Capture result
+        if (msg.type === 'result') {
+          sessionId = sessionId || (msg.session_id as string);
+          costUsd = msg.total_cost_usd as number | undefined;
+          numTurns = msg.num_turns as number | undefined;
+          durationMs = msg.duration_ms as number | undefined;
+
+          const usage = msg.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+          if (usage) {
+            inputTokens = usage.input_tokens;
+            outputTokens = usage.output_tokens;
+          }
+
+          if (msg.subtype === 'success') {
+            success = true;
+            resultOutput = (msg.result as string) || '';
+          } else {
+            success = false;
+            const errors = msg.errors as string[] | undefined;
+            resultOutput = `Error (${msg.subtype}): ${errors?.join('; ') || 'Unknown error'}`;
+          }
+
+          if (langfuseTrace) {
+            createGeneration(langfuseTrace, {
+              name: 'claude-code:execution',
+              model: 'claude-agent-sdk',
+              input: { prompt },
+              output: resultOutput,
+              usage: {
+                input: inputTokens,
+                output: outputTokens,
+              },
+              metadata: {
+                success,
+                subtype: msg.subtype as string,
+                numTurns,
+                costUsd,
+                durationMs,
+                toolsUsed,
+              },
+            });
+          }
+        }
+      }
+    } catch (error) {
+      success = false;
+      resultOutput = error instanceof Error ? error.message : 'Unknown error during Claude Code execution';
+      durationMs = Date.now() - queryStartTime;
+
+      if (langfuseTrace) {
+        createSpan(langfuseTrace, {
+          name: 'claude-code:error',
+          input: { prompt },
+          output: { error: resultOutput },
+          metadata: { durationMs },
+        });
+      }
+    }
+
+    return {
+      success,
+      output: resultOutput,
+      sessionId,
+      costUsd,
+      inputTokens,
+      outputTokens,
+      numTurns,
+      durationMs,
+      toolsUsed,
+    };
+  }
+
+  /**
    * Invoke Claude Code with a new session
    */
   private async handleInvoke(args: Record<string, unknown>): Promise<{
@@ -197,11 +413,13 @@ export class DeveloperServer {
       working_directory = this.repoRoot,
       allowed_tools,
       max_turns = 20,
+      system_prompt,
     } = args as {
       prompt: string;
       working_directory?: string;
       allowed_tools?: string[];
       max_turns?: number;
+      system_prompt?: string;
     };
 
     // Create new session
@@ -216,27 +434,66 @@ export class DeveloperServer {
     };
     this.sessions.set(sessionId, session);
 
+    // Create Langfuse trace for this developer session
+    const langfuseTrace = createTrace({
+      id: sessionId,
+      name: 'developer-invoke',
+      metadata: {
+        prompt: (prompt as string).substring(0, 200),
+        workingDirectory: working_directory,
+        maxTurns: max_turns,
+      },
+      tags: ['developer', 'claude-code-sdk'],
+      input: prompt,
+    });
+
     try {
-      // Build Claude Code CLI command
-      const cliArgs = this.buildCliArgs({
-        prompt: prompt as string,
+      // Build SDK options
+      const sdkOptions = this.buildSdkOptions({
         workingDirectory: working_directory as string,
         allowedTools: allowed_tools as string[] | undefined,
         maxTurns: max_turns as number,
+        systemPrompt: system_prompt as string | undefined,
       });
 
-      // Execute Claude Code
-      const result = await this.executeClaude(cliArgs, working_directory as string);
+      // Execute via Claude Agent SDK
+      const result = await this.executeClaudeQuery(
+        prompt as string,
+        sdkOptions,
+        langfuseTrace
+      );
 
       // Update session
       session.turns.push({
         prompt: prompt as string,
         response: result.output,
         timestamp: new Date().toISOString(),
+        costUsd: result.costUsd,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        numTurns: result.numTurns,
+        durationMs: result.durationMs,
       });
       session.lastActivity = new Date().toISOString();
       session.status = result.success ? 'completed' : 'failed';
       session.claudeSessionId = result.sessionId;
+
+      // Finalize Langfuse trace
+      if (langfuseTrace) {
+        langfuseTrace.update({
+          output: result.output.substring(0, 1000),
+          metadata: {
+            success: result.success,
+            costUsd: result.costUsd,
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            numTurns: result.numTurns,
+            durationMs: result.durationMs,
+            toolsUsed: result.toolsUsed,
+          },
+        });
+        await flushLangfuse();
+      }
 
       return {
         content: [
@@ -248,6 +505,12 @@ export class DeveloperServer {
                 claude_session_id: result.sessionId,
                 status: session.status,
                 output: result.output,
+                cost_usd: result.costUsd,
+                input_tokens: result.inputTokens,
+                output_tokens: result.outputTokens,
+                num_turns: result.numTurns,
+                duration_ms: result.durationMs,
+                tools_used: result.toolsUsed,
                 can_resume: !!result.sessionId,
               },
               null,
@@ -258,6 +521,14 @@ export class DeveloperServer {
       };
     } catch (error) {
       session.status = 'failed';
+
+      if (langfuseTrace) {
+        langfuseTrace.update({
+          output: { error: error instanceof Error ? error.message : 'Unknown error' },
+        });
+        await flushLangfuse();
+      }
+
       return {
         content: [
           {
@@ -317,25 +588,61 @@ export class DeveloperServer {
       };
     }
 
+    // Create Langfuse trace for resume
+    const langfuseTrace = createTrace({
+      id: randomUUID(),
+      name: 'developer-resume',
+      sessionId: session.id,
+      metadata: {
+        prompt: prompt.substring(0, 200),
+        resumeSessionId: session.claudeSessionId,
+        turnNumber: session.turns.length + 1,
+      },
+      tags: ['developer', 'claude-code-sdk', 'resume'],
+      input: prompt,
+    });
+
     try {
-      // Build CLI args with resume
-      const cliArgs = this.buildCliArgs({
-        prompt,
+      // Build SDK options with resume
+      const sdkOptions = this.buildSdkOptions({
         workingDirectory: session.workingDirectory,
         resumeSessionId: session.claudeSessionId,
       });
 
-      // Execute Claude Code
-      const result = await this.executeClaude(cliArgs, session.workingDirectory);
+      // Execute via Claude Agent SDK
+      const result = await this.executeClaudeQuery(
+        prompt,
+        sdkOptions,
+        langfuseTrace
+      );
 
       // Update session
       session.turns.push({
         prompt,
         response: result.output,
         timestamp: new Date().toISOString(),
+        costUsd: result.costUsd,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        numTurns: result.numTurns,
+        durationMs: result.durationMs,
       });
       session.lastActivity = new Date().toISOString();
       session.status = result.success ? 'active' : 'failed';
+
+      // Finalize Langfuse trace
+      if (langfuseTrace) {
+        langfuseTrace.update({
+          output: result.output.substring(0, 1000),
+          metadata: {
+            success: result.success,
+            costUsd: result.costUsd,
+            numTurns: result.numTurns,
+            toolsUsed: result.toolsUsed,
+          },
+        });
+        await flushLangfuse();
+      }
 
       return {
         content: [
@@ -347,6 +654,12 @@ export class DeveloperServer {
                 claude_session_id: session.claudeSessionId,
                 status: session.status,
                 output: result.output,
+                cost_usd: result.costUsd,
+                input_tokens: result.inputTokens,
+                output_tokens: result.outputTokens,
+                num_turns: result.numTurns,
+                duration_ms: result.durationMs,
+                tools_used: result.toolsUsed,
                 turn_number: session.turns.length,
                 can_resume: true,
               },
@@ -358,6 +671,14 @@ export class DeveloperServer {
       };
     } catch (error) {
       session.status = 'failed';
+
+      if (langfuseTrace) {
+        langfuseTrace.update({
+          output: { error: error instanceof Error ? error.message : 'Unknown error' },
+        });
+        await flushLangfuse();
+      }
+
       return {
         content: [
           {
@@ -417,6 +738,11 @@ export class DeveloperServer {
                 timestamp: t.timestamp,
                 prompt_preview: t.prompt.substring(0, 100) + (t.prompt.length > 100 ? '...' : ''),
                 response_preview: t.response.substring(0, 200) + (t.response.length > 200 ? '...' : ''),
+                cost_usd: t.costUsd,
+                input_tokens: t.inputTokens,
+                output_tokens: t.outputTokens,
+                num_turns: t.numTurns,
+                duration_ms: t.durationMs,
               })),
               can_resume: !!session.claudeSessionId && session.status !== 'failed',
             },
@@ -478,113 +804,6 @@ export class DeveloperServer {
     };
   }
 
-  /**
-   * Build CLI arguments for Claude Code
-   */
-  private buildCliArgs(options: {
-    prompt: string;
-    workingDirectory: string;
-    allowedTools?: string[];
-    maxTurns?: number;
-    resumeSessionId?: string;
-  }): string[] {
-    const args: string[] = [];
-
-    // Non-interactive mode with prompt
-    args.push('-p', options.prompt);
-
-    // Resume session if specified
-    if (options.resumeSessionId) {
-      args.push('--resume', options.resumeSessionId);
-    }
-
-    // Max turns
-    if (options.maxTurns) {
-      args.push('--max-turns', options.maxTurns.toString());
-    }
-
-    // Allowed tools
-    if (options.allowedTools && options.allowedTools.length > 0) {
-      args.push('--allowedTools', options.allowedTools.join(','));
-    }
-
-    // MCP config if available
-    if (this.mcpConfigPath) {
-      args.push('--mcp-config', this.mcpConfigPath);
-    }
-
-    // Output format for easier parsing
-    args.push('--output-format', 'json');
-
-    return args;
-  }
-
-  /**
-   * Execute Claude Code CLI
-   */
-  private executeClaude(
-    args: string[],
-    workingDirectory: string
-  ): Promise<{ success: boolean; output: string; sessionId?: string }> {
-    return new Promise((resolve, reject) => {
-      const proc = spawn('claude', args, {
-        cwd: workingDirectory,
-        env: {
-          ...process.env,
-          // Ensure Claude Code uses same environment
-          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      proc.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      proc.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      proc.on('error', (error) => {
-        reject(new Error(`Failed to start Claude Code: ${error.message}`));
-      });
-
-      proc.on('close', (code) => {
-        if (code === 0 || code === null) {
-          // Try to parse JSON output
-          try {
-            const parsed = JSON.parse(stdout);
-            resolve({
-              success: true,
-              output: parsed.result || stdout,
-              sessionId: parsed.session_id,
-            });
-          } catch {
-            // Not JSON, return raw output
-            resolve({
-              success: true,
-              output: stdout || 'Task completed',
-            });
-          }
-        } else {
-          resolve({
-            success: false,
-            output: stderr || stdout || `Claude Code exited with code ${code}`,
-          });
-        }
-      });
-
-      // Timeout after 10 minutes
-      setTimeout(() => {
-        proc.kill('SIGTERM');
-        reject(new Error('Claude Code execution timed out after 10 minutes'));
-      }, 10 * 60 * 1000);
-    });
-  }
-
   getServer(): Server {
     return this.server;
   }
@@ -599,6 +818,7 @@ export class DeveloperServer {
         description:
           'Invoke Claude Code to perform a development task. Creates a new session with Claude Code ' +
           'that has full capabilities: reading/writing files, running commands, git operations, etc. ' +
+          'Uses the Claude Agent SDK for a conversational loop with streaming progress. ' +
           'Use this to delegate implementation work while retaining oversight.',
         input_schema: {
           type: 'object' as const,
@@ -623,6 +843,10 @@ export class DeveloperServer {
             max_turns: {
               type: 'number',
               description: 'Maximum number of turns before stopping (default: 20)',
+            },
+            system_prompt: {
+              type: 'string',
+              description: 'Optional system prompt to append to the default Claude Code prompt',
             },
           },
           required: ['prompt'],

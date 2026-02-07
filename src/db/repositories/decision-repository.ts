@@ -91,19 +91,19 @@ export class DecisionRepository extends BaseRepository {
     let paramCount = 1;
 
     if (updates.status) {
-      fields.push(`status = \$${paramCount++}`);
+      fields.push(`status = $${paramCount++}`);
       values.push(updates.status);
     }
     if (updates.embedding) {
-      fields.push(`embedding = \$${paramCount++}`);
+      fields.push(`embedding = $${paramCount++}`);
       values.push(`[${updates.embedding.join(',')}]`);
     }
     if (updates.relatedDecisions) {
-      fields.push(`related_decisions = \$${paramCount++}`);
+      fields.push(`related_decisions = $${paramCount++}`);
       values.push(updates.relatedDecisions);
     }
     if (updates.tags) {
-      fields.push(`tags = \$${paramCount++}`);
+      fields.push(`tags = $${paramCount++}`);
       values.push(updates.tags);
     }
 
@@ -115,7 +115,7 @@ export class DecisionRepository extends BaseRepository {
 
     values.push(id);
     const result = await this.query(
-      `UPDATE decisions SET ${fields.join(', ')} WHERE id = \$${paramCount} RETURNING *`,
+      `UPDATE decisions SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`,
       values
     );
 

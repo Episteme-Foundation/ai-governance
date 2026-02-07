@@ -27,3 +27,6 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+# Wiki cache (cloned wiki repo)
+.cache/

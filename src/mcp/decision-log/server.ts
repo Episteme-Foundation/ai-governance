@@ -5,7 +5,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { DecisionRepository } from '../../db/repositories/decision-repository';
 import { EmbeddingsService } from '../../context/embeddings';
-import { Decision } from '../../types';
 
 /**
  * MCP Server for Decision Log operations

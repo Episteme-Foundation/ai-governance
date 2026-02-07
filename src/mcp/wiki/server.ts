@@ -3,15 +3,17 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import Anthropic from '@anthropic-ai/sdk';
 import { WikiDraftRepository } from '../../db/repositories/wiki-draft-repository';
 import { WikiLoader } from '../../context/loaders/wiki-loader';
 import { ProjectConfig } from '../../types';
+import { loadProjectConfig } from '../../config/load-project';
 
 /**
  * MCP Server for Wiki operations
  *
  * Provides tools for:
- * - Searching wiki pages
+ * - Searching wiki pages (backed by GitHub Wiki git repo)
  * - Getting wiki pages
  * - Proposing wiki edits (requires curator approval)
  * - Approving/rejecting wiki drafts (curator only)
@@ -36,6 +38,13 @@ export class WikiServer {
     );
 
     this.setupHandlers();
+  }
+
+  /**
+   * Resolve a project_id to a ProjectConfig.
+   */
+  private resolveProject(projectId: string): ProjectConfig {
+    return loadProjectConfig(projectId);
   }
 
   private setupHandlers(): void {
@@ -240,14 +249,23 @@ export class WikiServer {
   }
 
   private async handleWikiSearch(args: any) {
-    // TODO: Implement wiki search
+    const { project_id, query } = args;
+    const project = this.resolveProject(project_id);
+    const results = await this.wikiLoader.search(project, query);
+
     return {
       content: [
         {
           type: 'text',
           text: JSON.stringify({
-            message: 'Wiki search not yet implemented',
-            results: [],
+            query,
+            results: results.map((page) => ({
+              path: page.path,
+              title: page.title,
+              summary: page.summary,
+              lastModified: page.lastModified,
+            })),
+            total: results.length,
           }),
         },
       ],
@@ -255,13 +273,35 @@ export class WikiServer {
   }
 
   private async handleWikiGetPage(args: any) {
-    // TODO: Implement wiki page fetching
+    const { project_id, page_path } = args;
+    const project = this.resolveProject(project_id);
+    const page = await this.wikiLoader.loadPage(project, page_path);
+
+    if (!page) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              error: `Page '${page_path}' not found`,
+              message:
+                'The wiki page does not exist. Use wiki_propose_page to create it.',
+            }),
+          },
+        ],
+      };
+    }
+
     return {
       content: [
         {
           type: 'text',
           text: JSON.stringify({
-            message: 'Wiki page fetching not yet implemented',
+            path: page.path,
+            title: page.title,
+            content: page.content,
+            lastModified: page.lastModified,
+            modifiedBy: page.modifiedBy,
           }),
         },
       ],
@@ -272,12 +312,16 @@ export class WikiServer {
     const { project_id, page_path, proposed_content, edit_summary, proposed_by } =
       args;
 
+    // Fetch current content for the diff
+    const project = this.resolveProject(project_id);
+    const currentPage = await this.wikiLoader.loadPage(project, page_path);
+
     const draft = await this.wikiDraftRepo.create({
       projectId: project_id,
       type: 'edit_page',
       pagePath: page_path,
       proposedContent: proposed_content,
-      originalContent: undefined, // TODO: Fetch current content
+      originalContent: currentPage?.content,
       proposedBy: proposed_by,
       proposedAt: new Date().toISOString(),
       editSummary: edit_summary,
@@ -353,7 +397,19 @@ export class WikiServer {
       feedback
     );
 
-    // TODO: Actually publish to GitHub Wiki
+    // Publish to GitHub Wiki
+    let published = false;
+    try {
+      const project = this.resolveProject(draft.projectId);
+      published = await this.wikiLoader.writePage(
+        project,
+        draft.pagePath,
+        draft.proposedContent,
+        `${draft.editSummary} (approved by ${reviewed_by})`
+      );
+    } catch {
+      // Publishing failed but draft is still approved in DB
+    }
 
     return {
       content: [
@@ -361,7 +417,10 @@ export class WikiServer {
           type: 'text',
           text: JSON.stringify({
             success: true,
-            message: 'Draft approved and published to wiki',
+            published,
+            message: published
+              ? 'Draft approved and published to wiki'
+              : 'Draft approved but publishing to wiki failed — may need manual push',
             draft,
           }),
         },
@@ -533,6 +592,3 @@ export class WikiServer {
     }
   }
 }
-
-// Import Anthropic types
-import Anthropic from '@anthropic-ai/sdk';

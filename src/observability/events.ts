@@ -1,4 +1,4 @@
-import { emitEvent, isTelemetryEnabled } from './telemetry';
+import { emitEvent } from './telemetry';
 
 /**
  * AI Governance Events
