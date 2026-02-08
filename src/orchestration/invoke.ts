@@ -427,7 +427,7 @@ export class AgentInvoker {
           cache_control: { type: 'ephemeral' as const },
         };
         const modelId = role.model || 'claude-opus-4-6';
-        const maxTokens = role.maxTokens || 200000;
+        const maxTokens = role.maxTokens || 128000;
         const stream = this.anthropic.messages.stream({
           model: modelId,
           max_tokens: maxTokens,

@@ -1,7 +1,7 @@
 name: engineer
 purpose: Implement features, fix bugs, and drive continuous self-improvement
 model: claude-opus-4-6
-max_tokens: 200000
+max_tokens: 128000
 
 accepts_trust:
   - authorized
