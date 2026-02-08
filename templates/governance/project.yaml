@@ -1,0 +1,50 @@
+# .governance/project.yaml — Project governance configuration
+#
+# This file defines how the AI governance framework manages your project.
+# Place it at .governance/project.yaml in your repository root.
+#
+# Required: project section with id, name, and repository
+# Optional: everything else has sensible defaults
+
+project:
+  id: my-project                          # Unique identifier for this project
+  name: My Project                        # Human-readable project name
+  repository: https://github.com/org/repo # GitHub repository URL
+  constitution: CONSTITUTION.md           # Path to constitution (relative to .governance/)
+
+# Who to contact for escalations
+oversight:
+  contacts:
+    - name: Your Name
+      github: your-github-username
+      # email: you@example.com
+  escalation_threshold:
+    overturned_challenges: true
+    constitutional_amendments: true
+    custom_rules: []
+
+# Rate limits per trust level (requests per hour)
+limits:
+  anonymous:
+    requests_per_hour: 10
+  contributor:
+    requests_per_hour: 100
+  authorized:
+    requests_per_hour: 0  # 0 = unlimited
+
+# Map GitHub roles to governance trust levels
+trust:
+  github_roles:
+    public: anonymous
+    collaborator: contributor
+    maintainer: authorized
+    admin: elevated
+  api_keys: []
+
+# Optional: customize how intents route to roles
+# routing:
+#   triage: [reception, maintainer]
+#   governance: [maintainer]
+#   review: [maintainer]
+#   development: [engineer, maintainer]
+#   maintenance: [engineer, maintainer]

@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ProjectConfig } from '../../types';
+import type { ProjectRegistry } from '../../config/project-registry';
 
 /**
  * Loads project constitutions
@@ -10,7 +11,7 @@ export class ConstitutionLoader {
   private static readonly CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
 
   /**
-   * Load a project's constitution
+   * Load a project's constitution from local filesystem
    * @param project - Project configuration
    * @param projectRoot - Root directory of the project
    * @returns Constitution markdown content
@@ -33,6 +34,32 @@ export class ConstitutionLoader {
     this.cache.set(cacheKey, { content, cachedAt: now });
 
     return content;
+  }
+
+  /**
+   * Load constitution content for a project, supporting remote projects
+   *
+   * For remote projects: reads from DB (synced from .governance/CONSTITUTION.md)
+   * For local projects: falls back to filesystem loading
+   *
+   * @param project - Project configuration
+   * @param registry - ProjectRegistry for DB access
+   * @param projectRoot - Fallback filesystem root
+   * @returns Constitution markdown content
+   */
+  static async loadForProject(
+    project: ProjectConfig,
+    registry: ProjectRegistry,
+    projectRoot: string = process.cwd()
+  ): Promise<string> {
+    // Check DB for project-specific constitution
+    const dbContent = await registry.getConstitutionContent(project.id);
+    if (dbContent) {
+      return dbContent;
+    }
+
+    // Fall back to filesystem loading
+    return this.load(project, projectRoot);
   }
 
   /**

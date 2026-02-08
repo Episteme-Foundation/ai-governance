@@ -10,6 +10,7 @@ import {
   ConversationThreadRepository,
   Participant,
 } from '../db/repositories/conversation-thread-repository';
+import type { ProjectRegistry } from '../config/project-registry';
 
 /**
  * Builds system prompts for governance agents
@@ -19,7 +20,8 @@ export class SystemPromptBuilder {
     private readonly embeddingsService: EmbeddingsService,
     private readonly decisionLoader: DecisionLoader,
     private readonly projectRoot: string = process.cwd(),
-    private readonly conversationThreadRepo?: ConversationThreadRepository
+    private readonly conversationThreadRepo?: ConversationThreadRepository,
+    private readonly registry?: ProjectRegistry
   ) {}
 
   /**
@@ -38,11 +40,16 @@ export class SystemPromptBuilder {
     const sections: string[] = [];
 
     // 1. Philosophy (foundational principles)
-    const philosophy = PhilosophyLoader.load(this.projectRoot);
+    // For remote projects, load from DB; for local projects, load from filesystem
+    const philosophy = this.registry
+      ? await PhilosophyLoader.loadForProject(project.id, this.registry, this.projectRoot)
+      : PhilosophyLoader.load(this.projectRoot);
     sections.push('# Foundational Principles\n\n' + philosophy);
 
     // 2. Project Constitution (specific governance structure)
-    const constitution = ConstitutionLoader.load(project, this.projectRoot);
+    const constitution = this.registry
+      ? await ConstitutionLoader.loadForProject(project, this.registry, this.projectRoot)
+      : ConstitutionLoader.load(project, this.projectRoot);
     sections.push('\n\n# Project Constitution\n\n' + constitution);
 
     // 3. Wiki Landing Page (project knowledge)

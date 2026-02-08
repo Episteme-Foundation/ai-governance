@@ -16,6 +16,12 @@ COPY src ./src
 # Build TypeScript
 RUN npm run build
 
+# Build dashboard
+COPY dashboard/package*.json ./dashboard/
+RUN cd dashboard && npm ci
+COPY dashboard ./dashboard
+RUN cd dashboard && npm run build
+
 # Production stage
 FROM node:20-alpine
 
@@ -28,12 +34,14 @@ RUN npm ci --only=production --legacy-peer-deps
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy built dashboard
+COPY --from=builder /app/dashboard/dist ./dashboard/dist
+
 # Copy governance documents (needed at runtime for context assembly)
+# Remote projects store these in DB; only self-governance needs the local files
 COPY PHILOSOPHY.md ./
 COPY CONSTITUTION.md ./
-COPY docs ./docs
 COPY projects ./projects
-COPY decisions ./decisions
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \

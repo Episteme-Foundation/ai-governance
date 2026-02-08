@@ -420,6 +420,26 @@ export const github = {
   },
 
   /**
+   * Create an issue in a repository
+   */
+  async createIssue(
+    owner: string,
+    repo: string,
+    title: string,
+    body: string,
+    labels?: string[]
+  ): Promise<GitHubIssue> {
+    const response = await githubRequest(owner, repo, `/issues`, {
+      method: 'POST',
+      body: JSON.stringify({ title, body, labels }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to create issue: ${response.status}`);
+    }
+    return response.json() as Promise<GitHubIssue>;
+  },
+
+  /**
    * Get repository collaborator permission for a user
    */
   async getCollaboratorPermission(owner: string, repo: string, username: string): Promise<GitHubPermission> {

@@ -34,6 +34,18 @@ export interface ProjectConfig {
   };
 
   mcp_servers: McpServerConfig[];
+
+  /** Where this config was loaded from: 'local' filesystem or 'remote' GitHub */
+  configSource?: 'local' | 'remote';
+
+  /** Project status for multi-tenant hosting */
+  status?: 'active' | 'pending_keys' | 'suspended';
+
+  /** Routing preferences: maps IntentCategory to preferred role names */
+  routing?: Record<string, string[]>;
+
+  /** GitHub App installation ID for this project */
+  githubInstallationId?: number;
 }
 
 export interface Contact {

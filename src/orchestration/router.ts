@@ -133,8 +133,8 @@ export class RequestRouter {
     project: ProjectConfig,
     intentCategory: IntentCategory
   ): RoleDefinition | null {
-    // Map intent categories to preferred role names
-    const preferredRoles: Record<IntentCategory, string[]> = {
+    // Default routing preferences
+    const defaultRouting: Record<IntentCategory, string[]> = {
       triage: ['reception', 'maintainer'],
       governance: ['maintainer'],
       review: ['maintainer'],
@@ -142,6 +142,15 @@ export class RequestRouter {
       maintenance: ['engineer', 'evaluator', 'maintainer'],
       unknown: [], // Use trust-based fallback
     };
+
+    // Use project-specific routing if defined, otherwise use defaults
+    const projectRouting = project.routing || {};
+    const preferredRoles: Record<IntentCategory, string[]> = {
+      ...defaultRouting,
+      ...Object.fromEntries(
+        Object.entries(projectRouting).filter(([key]) => key in defaultRouting)
+      ),
+    } as Record<IntentCategory, string[]>;
 
     const candidates = preferredRoles[intentCategory];
 

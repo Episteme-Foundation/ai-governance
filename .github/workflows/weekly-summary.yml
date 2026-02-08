@@ -1,0 +1,42 @@
+name: Weekly Governance Summary
+
+on:
+  schedule:
+    # Run every Monday at 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'Project ID to generate summary for (blank = all projects)'
+        required: false
+        type: string
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate weekly summary
+        env:
+          SERVICE_URL: ${{ vars.SERVICE_URL || 'https://your-service-url.com' }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+        run: |
+          PROJECT_ID="${{ inputs.project_id }}"
+
+          if [ -n "$PROJECT_ID" ]; then
+            echo "Generating summary for project: $PROJECT_ID"
+            curl -s -X POST "$SERVICE_URL/admin/projects/$PROJECT_ID/summary" \
+              -H "Content-Type: application/json" \
+              -H "X-Admin-Key: $ADMIN_API_KEY"
+          else
+            echo "Fetching all projects..."
+            PROJECTS=$(curl -s "$SERVICE_URL/admin/projects" \
+              -H "X-Admin-Key: $ADMIN_API_KEY" | jq -r '.projects[].id')
+
+            for project in $PROJECTS; do
+              echo "Generating summary for: $project"
+              curl -s -X POST "$SERVICE_URL/admin/projects/$project/summary" \
+                -H "Content-Type: application/json" \
+                -H "X-Admin-Key: $ADMIN_API_KEY"
+              sleep 2
+            done
+          fi

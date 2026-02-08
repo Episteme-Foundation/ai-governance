@@ -4,6 +4,7 @@ import {
   createGovernanceRequest,
 } from './github-webhook';
 import { GovernanceRequest } from '../../types';
+import type { ProjectRegistry } from '../../config/project-registry';
 
 /**
  * Result of handling a webhook event
@@ -458,6 +459,171 @@ function handleCheckRun(
 }
 
 /**
+ * Handle installation events (GitHub App installed on a repo)
+ * Triggers auto-discovery of .governance/ directory
+ */
+async function handleInstallation(
+  event: GitHubWebhookEvent,
+  registry: ProjectRegistry
+): Promise<WebhookHandlerResult> {
+  const payload = event.payload;
+  const installation = payload.installation as Record<string, unknown> | undefined;
+  const installationId = installation?.id as number | undefined;
+
+  if (!installationId) {
+    return {
+      shouldProcess: false,
+      skipReason: 'No installation ID in payload',
+    };
+  }
+
+  if (event.action === 'created') {
+    // App was installed — sync all repositories
+    const repositories = payload.repositories as Array<Record<string, unknown>> | undefined;
+
+    if (repositories) {
+      for (const repo of repositories) {
+        const fullName = repo.full_name as string;
+        const [owner, repoName] = fullName.split('/');
+
+        try {
+          const config = await registry.syncFromRepo(owner, repoName, installationId);
+          if (config) {
+            console.log(`[Webhook] Auto-registered project from ${fullName}`);
+          } else {
+            console.log(`[Webhook] No .governance/project.yaml found in ${fullName}`);
+          }
+        } catch (error) {
+          console.error(`[Webhook] Failed to sync ${fullName}:`, error);
+        }
+      }
+    }
+
+    return {
+      shouldProcess: false,
+      skipReason: 'Installation event processed (auto-discovery)',
+    };
+  }
+
+  if (event.action === 'deleted') {
+    // App was uninstalled — mark projects as suspended
+    const repositories = payload.repositories as Array<Record<string, unknown>> | undefined;
+
+    if (repositories) {
+      for (const repo of repositories) {
+        const fullName = repo.full_name as string;
+        const project = await registry.getByRepoId(fullName);
+        if (project) {
+          await registry.updateStatus(project.id, 'suspended');
+          console.log(`[Webhook] Suspended project ${project.id} (app uninstalled from ${fullName})`);
+        }
+      }
+    }
+
+    return {
+      shouldProcess: false,
+      skipReason: 'Installation deleted — projects suspended',
+    };
+  }
+
+  return {
+    shouldProcess: false,
+    skipReason: `Unhandled installation action: ${event.action}`,
+  };
+}
+
+/**
+ * Handle installation_repositories events (repos added/removed from installation)
+ */
+async function handleInstallationRepositories(
+  event: GitHubWebhookEvent,
+  registry: ProjectRegistry
+): Promise<WebhookHandlerResult> {
+  const payload = event.payload;
+  const installation = payload.installation as Record<string, unknown> | undefined;
+  const installationId = installation?.id as number | undefined;
+
+  if (!installationId) {
+    return {
+      shouldProcess: false,
+      skipReason: 'No installation ID in payload',
+    };
+  }
+
+  if (event.action === 'added') {
+    const added = payload.repositories_added as Array<Record<string, unknown>> | undefined;
+    if (added) {
+      for (const repo of added) {
+        const fullName = repo.full_name as string;
+        const [owner, repoName] = fullName.split('/');
+        try {
+          await registry.syncFromRepo(owner, repoName, installationId);
+        } catch (error) {
+          console.error(`[Webhook] Failed to sync added repo ${fullName}:`, error);
+        }
+      }
+    }
+  }
+
+  if (event.action === 'removed') {
+    const removed = payload.repositories_removed as Array<Record<string, unknown>> | undefined;
+    if (removed) {
+      for (const repo of removed) {
+        const fullName = repo.full_name as string;
+        const project = await registry.getByRepoId(fullName);
+        if (project) {
+          await registry.updateStatus(project.id, 'suspended');
+        }
+      }
+    }
+  }
+
+  return {
+    shouldProcess: false,
+    skipReason: 'Installation repositories event processed',
+  };
+}
+
+/**
+ * Handle push events that modify .governance/ files — triggers config re-sync
+ */
+async function handleGovernancePush(
+  event: GitHubWebhookEvent,
+  projectId: string,
+  registry: ProjectRegistry
+): Promise<WebhookHandlerResult | null> {
+  const payload = event.payload;
+  const commits = payload.commits as Array<Record<string, unknown>> | undefined;
+
+  if (!commits || commits.length === 0) return null;
+
+  // Check if any commits touch .governance/ files
+  const governanceChanged = commits.some((commit) => {
+    const added = (commit.added as string[]) || [];
+    const modified = (commit.modified as string[]) || [];
+    const removed = (commit.removed as string[]) || [];
+    const allFiles = [...added, ...modified, ...removed];
+    return allFiles.some((f) => f.startsWith('.governance/'));
+  });
+
+  if (!governanceChanged) return null;
+
+  // Re-sync the project config from the repo
+  const project = await registry.getByRepoId(projectId);
+  if (project?.githubInstallationId) {
+    try {
+      await registry.syncFromRepo(event.owner, event.repo, project.githubInstallationId);
+      console.log(`[Webhook] Re-synced .governance/ config for ${projectId}`);
+    } catch (error) {
+      console.error(`[Webhook] Failed to re-sync ${projectId}:`, error);
+    }
+  }
+
+  // Still process the push as a normal event (return null to fall through)
+  return null;
+}
+
+/**
  * Main handler that routes events to specific handlers
  */
 export function handleWebhookEvent(
@@ -493,6 +659,37 @@ export function handleWebhookEvent(
         skipReason: `Unhandled event type: ${event.event}`,
       };
   }
+}
+
+/**
+ * Extended handler that supports installation and push events with ProjectRegistry
+ * Falls back to handleWebhookEvent for standard events
+ */
+export async function handleWebhookEventAsync(
+  event: GitHubWebhookEvent,
+  projectId: string,
+  registry?: ProjectRegistry
+): Promise<WebhookHandlerResult> {
+  // Handle installation events (require registry)
+  if (registry) {
+    if (event.event === 'installation') {
+      return handleInstallation(event, registry);
+    }
+
+    if (event.event === 'installation_repositories') {
+      return handleInstallationRepositories(event, registry);
+    }
+
+    // For push events, check if .governance/ was modified
+    if (event.event === 'push') {
+      const pushResult = await handleGovernancePush(event, projectId, registry);
+      if (pushResult) return pushResult;
+      // Fall through to standard handling if not a governance push
+    }
+  }
+
+  // Fall back to synchronous handler for all other events
+  return handleWebhookEvent(event, projectId);
 }
 
 /**

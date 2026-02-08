@@ -1,0 +1,60 @@
+project:
+  id: ai-governance
+  name: AI Governance Framework
+  repository: https://github.com/Episteme-Foundation/ai-governance
+  constitution: CONSTITUTION.md
+
+oversight:
+  contacts:
+    - name: Jackson Hurley
+      email: jacksonwhurley@gmail.com
+      github: jacksonqueenking
+  escalation_threshold:
+    overturned_challenges: true
+    constitutional_amendments: true
+    custom_rules: []
+
+limits:
+  anonymous:
+    requests_per_hour: 10
+  contributor:
+    requests_per_hour: 100
+  authorized:
+    requests_per_hour: 0  # unlimited
+
+trust:
+  github_roles:
+    public: anonymous
+    collaborator: contributor
+    maintainer: authorized
+    admin: elevated
+  api_keys: []
+
+# Routing preferences (optional — defaults are sensible)
+# routing:
+#   triage: [reception, maintainer]
+#   governance: [maintainer]
+#   review: [maintainer]
+#   development: [engineer, maintainer]
+#   maintenance: [engineer, maintainer]
+
+mcp_servers:
+  - name: decision-log
+    type: custom
+    config:
+      database: ${DATABASE_URL}
+
+  - name: challenge
+    type: custom
+    config:
+      database: ${DATABASE_URL}
+
+  - name: developer
+    type: custom
+    config:
+      repo_root: ${REPO_ROOT}
+
+  - name: conversation
+    type: custom
+    config:
+      database: ${DATABASE_URL}

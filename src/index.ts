@@ -23,7 +23,6 @@ import { MCPExecutor } from './orchestration/mcp-executor';
 import { GovernanceServer } from './api/server';
 import { loadSecrets } from './config/load-secrets';
 import { createMCPClientManager } from './mcp/server-factory';
-// getInstallationToken no longer needed here — custom GitHubServer handles auth internally
 import { DecisionLogServer } from './mcp/decision-log/server';
 import { ChallengeServer } from './mcp/challenge/server';
 import { WikiServer } from './mcp/wiki/server';
@@ -31,6 +30,9 @@ import { LangfuseServer } from './mcp/langfuse/server';
 import { DeveloperServer } from './mcp/developer/server';
 import { GitHubServer } from './mcp/github/server';
 import { isLangfuseEnabled, shutdownLangfuse } from './observability';
+import { ProjectRegistry } from './config/project-registry';
+import { loadProjectConfig } from './config/load-project';
+import { NotificationService } from './notifications';
 
 /**
  * Main entry point for AI Governance application
@@ -69,6 +71,27 @@ async function main() {
 
   console.log('Connected to database');
 
+  // 1.5. ProjectRegistry — DB-first config resolution with filesystem fallback
+  const registry = new ProjectRegistry(dbPool);
+
+  // Run multi-project migration (idempotent — safe to run every startup)
+  try {
+    await registry.runMigration();
+  } catch (error) {
+    // Migration may fail on first run before projects table exists
+    // This is expected when using schema.sql without the migration
+    console.warn('[Startup] Migration 002 skipped (may not be needed yet):', (error as Error).message);
+  }
+
+  // Bootstrap self-governance: upsert local config into DB
+  try {
+    const selfConfig = loadProjectConfig('ai-governance');
+    await registry.register(selfConfig, { configSource: 'local' });
+    console.log('[Startup] Self-governance project registered in DB');
+  } catch (error) {
+    console.warn('[Startup] Could not bootstrap self-governance config:', (error as Error).message);
+  }
+
   // 2. Repositories
   const decisionRepo = new DecisionRepository(dbPool);
   const sessionRepo = new SessionRepository(dbPool);
@@ -83,12 +106,13 @@ async function main() {
   const embeddingsService = new EmbeddingsService(embeddingProvider);
   const decisionLoader = new DecisionLoader(decisionRepo);
 
-  // 4. Context assembly
+  // 4. Context assembly (with ProjectRegistry for remote project support)
   const promptBuilder = new SystemPromptBuilder(
     embeddingsService,
     decisionLoader,
     process.cwd(),
-    conversationThreadRepo
+    conversationThreadRepo,
+    registry
   );
 
   // 5. MCP Servers
@@ -173,8 +197,16 @@ async function main() {
     conversationThreadRepo
   );
 
-  // 6. API Server
-  const server = new GovernanceServer(trustClassifier, router, invoker, refreshGitHub);
+  // 6. Notification service
+  const notificationService = new NotificationService(dbPool, registry);
+  console.log('Notification service initialized');
+
+  // 7. API Server (with ProjectRegistry, dashboard repos, and notifications)
+  const server = new GovernanceServer(
+    trustClassifier, router, invoker, refreshGitHub, registry,
+    { pool: dbPool, decisions: decisionRepo, sessions: sessionRepo, challenges: challengeRepo, audit: auditRepo },
+    notificationService
+  );
 
   const port = parseInt(process.env.PORT || '3000', 10);
   await server.start(port);

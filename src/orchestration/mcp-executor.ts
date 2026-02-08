@@ -230,6 +230,25 @@ export class MCPExecutor {
   }
 
   /**
+   * Create a new MCPExecutor with a different GitHubServer, sharing all other servers.
+   * Used for per-request scoping to target the correct repository.
+   *
+   * @param server - GitHubServer scoped to the target repository
+   * @returns A new MCPExecutor with the specified GitHubServer
+   */
+  withGitHub(server: GitHubServer): MCPExecutor {
+    return new MCPExecutor(
+      this.mcpClient,
+      this.decisionLogServer,
+      this.challengeServer,
+      this.wikiServer,
+      this.langfuseServer,
+      this.developerServer,
+      server
+    );
+  }
+
+  /**
    * Get summary of connected servers
    */
   getServerSummary(): { mcpServers: string[]; customServers: string[] } {

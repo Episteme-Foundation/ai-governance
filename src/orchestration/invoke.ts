@@ -15,6 +15,7 @@ import { ConversationRepository } from '../db/repositories/conversation-reposito
 import { ConversationThreadRepository } from '../db/repositories/conversation-thread-repository';
 import { EmbeddingsService } from '../context/embeddings';
 import { MCPExecutor } from './mcp-executor';
+import { GitHubServer } from '../mcp/github/server';
 import { ConversationServer } from '../mcp/conversation/server';
 import {
   emitSessionStart,
@@ -315,8 +316,19 @@ export class AgentInvoker {
       conversationDepth
     );
 
+    // 3.6. Create per-request scoped MCPExecutor for the project's repository
+    let scopedExecutor = this.mcpExecutor;
+    const repoUrl = project.repository || '';
+    const repoMatch = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+    if (repoMatch) {
+      const [, projectOwner, projectRepo] = repoMatch;
+      const cleanRepo = projectRepo.replace(/\.git$/, '');
+      const scopedGitHub = new GitHubServer(projectOwner, cleanRepo);
+      scopedExecutor = this.mcpExecutor.withGitHub(scopedGitHub);
+    }
+
     // 4. Get available tools filtered by role permissions
-    const mcpTools = this.mcpExecutor.getToolDefinitions(
+    const mcpTools = scopedExecutor.getToolDefinitions(
       role.tools.allowed.length > 0 ? role.tools.allowed : undefined,
       role.tools.denied.length > 0 ? role.tools.denied : undefined
     );
@@ -414,9 +426,11 @@ export class AgentInvoker {
           text: systemPrompt,
           cache_control: { type: 'ephemeral' as const },
         };
+        const modelId = role.model || 'claude-opus-4-6';
+        const maxTokens = role.maxTokens || 200000;
         const response = await this.anthropic.messages.create({
-          model: 'claude-opus-4-6',
-          max_tokens: 200000,
+          model: modelId,
+          max_tokens: maxTokens,
           system: [systemBlock] as unknown as Anthropic.Messages.TextBlockParam[],
           messages,
           tools: tools.length > 0 ? tools : undefined,
@@ -530,11 +544,11 @@ export class AgentInvoker {
               }
             } else {
               // Execute via MCP executor
-              result = await this.mcpExecutor.executeTool(
+              result = await scopedExecutor.executeTool(
                 toolUse.name,
                 toolUse.input
               );
-              toolServer = this.mcpExecutor.getToolServer(toolUse.name) || 'unknown';
+              toolServer = scopedExecutor.getToolServer(toolUse.name) || 'unknown';
             }
             const toolDurationMs = Date.now() - toolStartTime;
             emitToolUse({

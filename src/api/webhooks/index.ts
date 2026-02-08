@@ -13,6 +13,7 @@ export {
 
 export {
   handleWebhookEvent,
+  handleWebhookEventAsync,
   handlers,
   type WebhookHandlerResult,
 } from './event-handlers';

@@ -1,4 +1,6 @@
 import Fastify, { FastifyInstance } from 'fastify';
+import * as path from 'path';
+import { existsSync } from 'fs';
 import { GovernanceRequest } from '../types';
 import { TrustClassifier } from '../orchestration/trust';
 import { RequestRouter } from '../orchestration/router';
@@ -6,9 +8,16 @@ import { AgentInvoker } from '../orchestration/invoke';
 import {
   verifyWebhookSignature,
   parseWebhookEvent,
-  handleWebhookEvent,
+  handleWebhookEventAsync,
 } from './webhooks';
 import { loadProjectByRepo, loadProjectConfig } from '../config/load-project';
+import type { ProjectRegistry } from '../config/project-registry';
+import type { Pool } from 'pg';
+import type { DecisionRepository } from '../db/repositories/decision-repository';
+import type { SessionRepository } from '../db/repositories/session-repository';
+import type { ChallengeRepository } from '../db/repositories/challenge-repository';
+import type { AuditRepository } from '../db/repositories/audit-repository';
+import type { NotificationService } from '../notifications/notification-service';
 
 /**
  * Fastify server for AI Governance API
@@ -27,6 +36,14 @@ interface RequestStatus {
   error?: string;
 }
 
+export interface DashboardDeps {
+  pool: Pool;
+  decisions: DecisionRepository;
+  sessions: SessionRepository;
+  challenges: ChallengeRepository;
+  audit: AuditRepository;
+}
+
 export class GovernanceServer {
   private app: FastifyInstance;
   private activeRequests = new Map<string, RequestStatus>();
@@ -35,7 +52,10 @@ export class GovernanceServer {
     private readonly trustClassifier: TrustClassifier,
     private readonly router: RequestRouter,
     private readonly invoker: AgentInvoker,
-    private readonly refreshGitHub?: () => Promise<void>
+    private readonly refreshGitHub?: () => Promise<void>,
+    private readonly registry?: ProjectRegistry,
+    private readonly dashboard?: DashboardDeps,
+    private readonly notifications?: NotificationService
   ) {
     this.app = Fastify({
       logger: true,
@@ -97,8 +117,8 @@ export class GovernanceServer {
       // Classify trust level
       governanceRequest.trust = this.trustClassifier.classify(governanceRequest);
 
-      // Load project configuration
-      const projectConfig = await loadProjectByRepo(project_id);
+      // Load project configuration (registry first, filesystem fallback)
+      const projectConfig = await this.resolveProject(project_id);
       if (!projectConfig) {
         reply.status(404);
         return {
@@ -203,8 +223,8 @@ export class GovernanceServer {
       // Determine project ID from repository
       const projectId = `${event.owner}/${event.repo}`;
 
-      // Route the event to appropriate handler
-      const result = handleWebhookEvent(event, projectId);
+      // Route the event to appropriate handler (async version supports installation/push events)
+      const result = await handleWebhookEventAsync(event, projectId, this.registry);
 
       if (!result.shouldProcess) {
         this.app.log.info({ reason: result.skipReason }, 'Skipping webhook event');
@@ -226,8 +246,8 @@ export class GovernanceServer {
         trust: governanceRequest.trust,
       }, 'Processing governance request');
 
-      // Load project configuration
-      const projectConfig = await loadProjectByRepo(projectId);
+      // Load project configuration (registry first, filesystem fallback)
+      const projectConfig = await this.resolveProject(projectId);
 
       if (!projectConfig) {
         this.app.log.warn({ projectId }, 'No project configuration found');
@@ -291,15 +311,8 @@ export class GovernanceServer {
         payload,
       };
 
-      // Load project configuration - try by repo ID first, then by project ID
-      let projectConfig = await loadProjectByRepo(project_id);
-      if (!projectConfig) {
-        try {
-          projectConfig = loadProjectConfig(project_id);
-        } catch {
-          // Not found by either method
-        }
-      }
+      // Load project configuration (registry first, filesystem fallback)
+      const projectConfig = await this.resolveProject(project_id);
 
       if (!projectConfig) {
         reply.status(404);
@@ -377,8 +390,8 @@ export class GovernanceServer {
         payload: { ...payload, scheduled: true, trigger: 'schedule' },
       };
 
-      // Load project configuration
-      const projectConfig = await loadProjectByRepo(project_id);
+      // Load project configuration (registry first, filesystem fallback)
+      const projectConfig = await this.resolveProject(project_id);
       if (!projectConfig) {
         reply.status(404);
         return { error: `No project configuration found for: ${project_id}` };
@@ -419,6 +432,392 @@ export class GovernanceServer {
         };
       }
     });
+
+    // ─── Admin API Endpoints ────────────────────────────────────────
+
+    // List all registered projects
+    this.app.get('/admin/projects', async (request, reply) => {
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      if (!this.registry) {
+        return { projects: [], note: 'ProjectRegistry not initialized' };
+      }
+
+      const projects = await this.registry.listAll();
+      return {
+        projects: projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          repository: p.repository,
+          status: p.status || 'active',
+          configSource: p.configSource || 'local',
+          roles: p.roles.map((r) => r.name),
+        })),
+      };
+    });
+
+    // Register a project explicitly
+    this.app.post<{
+      Body: {
+        project_id: string;
+        name: string;
+        repository: string;
+        config?: Record<string, unknown>;
+      };
+    }>('/admin/projects', async (request, reply) => {
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      if (!this.registry) {
+        reply.status(503);
+        return { error: 'ProjectRegistry not initialized' };
+      }
+
+      const { project_id, name, repository } = request.body;
+
+      // Try to load from filesystem first
+      let projectConfig = await this.resolveProject(project_id);
+      if (!projectConfig) {
+        // Create a minimal config
+        projectConfig = {
+          id: project_id,
+          name,
+          repository,
+          constitutionPath: 'CONSTITUTION.md',
+          project: { id: project_id, name, repository, constitution: 'CONSTITUTION.md' },
+          oversight: { contacts: [], escalation_threshold: { overturned_challenges: true, constitutional_amendments: true, custom_rules: [] } },
+          limits: { anonymous: { requests_per_hour: 10 }, contributor: { requests_per_hour: 100 }, authorized: { requests_per_hour: 0 } },
+          roles: [],
+          trust: { github_roles: {}, api_keys: [] },
+          mcp_servers: [],
+          configSource: 'local',
+          status: 'active',
+        };
+      }
+
+      await this.registry.register(projectConfig);
+
+      reply.status(201);
+      return { status: 'registered', project_id };
+    });
+
+    // Store API keys for a project
+    this.app.post<{
+      Params: { id: string };
+      Body: {
+        anthropic_api_key?: string;
+        openai_api_key?: string;
+      };
+    }>('/admin/projects/:id/secrets', async (request, reply) => {
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      if (!this.registry) {
+        reply.status(503);
+        return { error: 'ProjectRegistry not initialized' };
+      }
+
+      const projectId = request.params.id;
+      const { anthropic_api_key, openai_api_key } = request.body;
+
+      const project = await this.registry.getById(projectId);
+      if (!project) {
+        reply.status(404);
+        return { error: `Project not found: ${projectId}` };
+      }
+
+      await this.registry.storeSecrets(projectId, {
+        anthropicApiKey: anthropic_api_key,
+        openaiApiKey: openai_api_key,
+      });
+
+      return {
+        status: 'updated',
+        project_id: projectId,
+        keys_stored: {
+          anthropic: !!anthropic_api_key,
+          openai: !!openai_api_key,
+        },
+      };
+    });
+
+    // ─── Dashboard API Endpoints ──────────────────────────────────────
+
+    // Get decisions for a project
+    this.app.get<{
+      Params: { id: string };
+      Querystring: { limit?: string; status?: string };
+    }>('/admin/projects/:id/decisions', async (request, reply) => {
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      if (!this.dashboard) {
+        reply.status(503);
+        return { error: 'Dashboard not initialized' };
+      }
+
+      const projectId = request.params.id;
+      const limit = parseInt(request.query.limit || '50', 10);
+
+      const decisions = await this.dashboard.decisions.getByProject(projectId, limit);
+      return { project_id: projectId, decisions };
+    });
+
+    // Get sessions for a project
+    this.app.get<{
+      Params: { id: string };
+      Querystring: { limit?: string; status?: string };
+    }>('/admin/projects/:id/sessions', async (request, reply) => {
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      if (!this.dashboard) {
+        reply.status(503);
+        return { error: 'Dashboard not initialized' };
+      }
+
+      const projectId = request.params.id;
+      const limit = parseInt(request.query.limit || '50', 10);
+      const status = request.query.status;
+
+      // Use existing repo methods; for a richer query we hit the pool directly
+      if (status === 'active') {
+        const sessions = await this.dashboard.sessions.getActive(projectId);
+        return { project_id: projectId, sessions };
+      }
+
+      // General list: all sessions ordered by started_at DESC
+      const result = await this.dashboard.pool.query(
+        `SELECT * FROM sessions WHERE project_id = $1 ORDER BY started_at DESC LIMIT $2`,
+        [projectId, limit]
+      );
+
+      const sessions = result.rows.map((row: Record<string, unknown>) => ({
+        id: row.id,
+        projectId: row.project_id,
+        role: row.role,
+        request: row.request,
+        startedAt: row.started_at,
+        endedAt: row.ended_at,
+        status: row.status,
+        toolUses: (row.tool_uses as unknown[]) || [],
+        decisionsLogged: (row.decisions_logged as string[]) || [],
+        escalations: (row.escalations as string[]) || [],
+      }));
+
+      return { project_id: projectId, sessions };
+    });
+
+    // Get challenges for a project
+    this.app.get<{
+      Params: { id: string };
+      Querystring: { status?: string };
+    }>('/admin/projects/:id/challenges', async (request, reply) => {
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      if (!this.dashboard) {
+        reply.status(503);
+        return { error: 'Dashboard not initialized' };
+      }
+
+      const projectId = request.params.id;
+      const status = request.query.status;
+
+      const challenges = await this.dashboard.challenges.getByProject(projectId, status);
+      return { project_id: projectId, challenges };
+    });
+
+    // Get audit log for a project
+    this.app.get<{
+      Params: { id: string };
+      Querystring: { limit?: string };
+    }>('/admin/projects/:id/audit', async (request, reply) => {
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      if (!this.dashboard) {
+        reply.status(503);
+        return { error: 'Dashboard not initialized' };
+      }
+
+      const projectId = request.params.id;
+      const limit = parseInt(request.query.limit || '100', 10);
+
+      const entries = await this.dashboard.audit.getByProject(projectId, limit);
+      return { project_id: projectId, audit_log: entries };
+    });
+
+    // Get aggregate stats for a project
+    this.app.get<{
+      Params: { id: string };
+    }>('/admin/projects/:id/stats', async (request, reply) => {
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      if (!this.dashboard) {
+        reply.status(503);
+        return { error: 'Dashboard not initialized' };
+      }
+
+      const projectId = request.params.id;
+
+      // Run all stat queries in parallel
+      const [decisionsResult, sessionsResult, challengesResult, pendingChallenges, recentActivity] = await Promise.all([
+        this.dashboard.pool.query(
+          'SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status = $2) as adopted FROM decisions WHERE project_id = $1',
+          [projectId, 'adopted']
+        ),
+        this.dashboard.pool.query(
+          `SELECT COUNT(*) as total,
+                  COUNT(*) FILTER (WHERE status = 'active') as active,
+                  COUNT(*) FILTER (WHERE status = 'completed') as completed,
+                  COUNT(*) FILTER (WHERE status = 'failed') as failed
+           FROM sessions WHERE project_id = $1`,
+          [projectId]
+        ),
+        this.dashboard.pool.query(
+          `SELECT COUNT(*) as total,
+                  COUNT(*) FILTER (WHERE status = 'pending') as pending,
+                  COUNT(*) FILTER (WHERE status = 'accepted') as accepted,
+                  COUNT(*) FILTER (WHERE status = 'rejected') as rejected
+           FROM challenges WHERE project_id = $1`,
+          [projectId]
+        ),
+        this.dashboard.challenges.getByProject(projectId, 'pending'),
+        this.dashboard.audit.getByProject(projectId, 10),
+      ]);
+
+      return {
+        project_id: projectId,
+        decisions: {
+          total: parseInt(decisionsResult.rows[0].total, 10),
+          adopted: parseInt(decisionsResult.rows[0].adopted, 10),
+        },
+        sessions: {
+          total: parseInt(sessionsResult.rows[0].total, 10),
+          active: parseInt(sessionsResult.rows[0].active, 10),
+          completed: parseInt(sessionsResult.rows[0].completed, 10),
+          failed: parseInt(sessionsResult.rows[0].failed, 10),
+        },
+        challenges: {
+          total: parseInt(challengesResult.rows[0].total, 10),
+          pending: parseInt(challengesResult.rows[0].pending, 10),
+          accepted: parseInt(challengesResult.rows[0].accepted, 10),
+          rejected: parseInt(challengesResult.rows[0].rejected, 10),
+        },
+        pending_challenges: pendingChallenges,
+        recent_activity: recentActivity,
+      };
+    });
+
+    // ─── Notification Endpoints ─────────────────────────────────────
+
+    // Trigger notification checks (called by cron/scheduler)
+    this.app.post('/admin/notifications/check', async (request, reply) => {
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      if (!this.notifications) {
+        reply.status(503);
+        return { error: 'Notification service not initialized' };
+      }
+
+      // Run checks in background
+      this.notifications.runAllChecks().catch((err) =>
+        this.app.log.error({ err }, 'Notification check failed')
+      );
+
+      return { status: 'started', message: 'Notification checks triggered' };
+    });
+
+    // Generate weekly summary for a project
+    this.app.post<{
+      Params: { id: string };
+    }>('/admin/projects/:id/summary', async (request, reply) => {
+      const adminKey = request.headers['x-admin-key'] as string | undefined;
+      const expectedKey = process.env.ADMIN_API_KEY;
+      if (expectedKey && adminKey !== expectedKey) {
+        reply.status(401);
+        return { error: 'Invalid admin API key' };
+      }
+
+      if (!this.notifications) {
+        reply.status(503);
+        return { error: 'Notification service not initialized' };
+      }
+
+      const projectId = request.params.id;
+      await this.notifications.generateSummary(projectId);
+
+      return { status: 'sent', project_id: projectId };
+    });
+
+    // ─── Serve Dashboard Static Files ─────────────────────────────────
+
+    const dashboardPath = path.join(__dirname, '..', '..', 'dashboard', 'dist');
+    if (existsSync(dashboardPath)) {
+      // Dynamic import to avoid hard dependency on @fastify/static
+      import('@fastify/static').then((mod) => {
+        const fastifyStatic = mod.default;
+        this.app.register(fastifyStatic, {
+          root: dashboardPath,
+          prefix: '/dashboard/',
+          decorateReply: false,
+        });
+      }).catch(() => {
+        this.app.log.info('@fastify/static not available, skipping dashboard');
+      });
+
+      // SPA fallback for dashboard routes
+      this.app.setNotFoundHandler((request, reply) => {
+        if (request.url.startsWith('/dashboard')) {
+          reply.sendFile('index.html', dashboardPath);
+        } else {
+          reply.status(404).send({ error: 'Not found' });
+        }
+      });
+    }
   }
 
   /**
@@ -466,6 +865,28 @@ export class GovernanceServer {
         completedAt: new Date().toISOString(),
         ...(error && { error }),
       });
+    }
+  }
+
+  /**
+   * Resolve project config: registry first, filesystem fallback
+   */
+  private async resolveProject(projectId: string): Promise<import('../types').ProjectConfig | null> {
+    if (this.registry) {
+      // Try by repo ID first (owner/repo), then by project ID
+      const config = await this.registry.getByRepoId(projectId)
+        || await this.registry.getById(projectId);
+      if (config) return config;
+    }
+
+    // Filesystem fallback
+    const fsConfig = await loadProjectByRepo(projectId);
+    if (fsConfig) return fsConfig;
+
+    try {
+      return loadProjectConfig(projectId);
+    } catch {
+      return null;
     }
   }
 

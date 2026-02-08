@@ -26,4 +26,8 @@ export interface RoleDefinition {
   escalatesTo?: string;
   instructions: string;
   constraints: Constraint[];
+  /** Model to use for this role (default: claude-sonnet-4-5-20250929) */
+  model?: string;
+  /** Max output tokens for this role (default: 8192) */
+  maxTokens?: number;
 }

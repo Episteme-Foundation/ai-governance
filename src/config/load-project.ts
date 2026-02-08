@@ -76,7 +76,7 @@ export async function loadProjectByRepo(
 /**
  * Parse raw YAML into ProjectConfig
  */
-function parseProjectConfig(raw: Record<string, unknown>): ProjectConfig {
+export function parseProjectConfig(raw: Record<string, unknown>): ProjectConfig {
   const project = raw.project as Record<string, string>;
   const oversight = raw.oversight as Record<string, unknown>;
   const limits = raw.limits as Record<string, RateLimit>;
@@ -131,7 +131,7 @@ function parseProjectConfig(raw: Record<string, unknown>): ProjectConfig {
 /**
  * Parse a role definition from YAML
  */
-function parseRole(raw: Record<string, unknown>): RoleDefinition {
+export function parseRole(raw: Record<string, unknown>): RoleDefinition {
   const tools = raw.tools as Record<string, string[]>;
   const constraints = raw.constraints as Array<Record<string, unknown>> | undefined;
 
@@ -147,6 +147,8 @@ function parseRole(raw: Record<string, unknown>): RoleDefinition {
     escalatesTo: (raw.escalates_to as string) || undefined,
     instructions: (raw.instructions as string) || '',
     constraints: constraints?.map(parseConstraint) || [],
+    model: (raw.model as string) || undefined,
+    maxTokens: (raw.max_tokens as number) || undefined,
   };
 }
 
