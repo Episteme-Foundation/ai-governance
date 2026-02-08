@@ -428,15 +428,16 @@ export class AgentInvoker {
         };
         const modelId = role.model || 'claude-opus-4-6';
         const maxTokens = role.maxTokens || 200000;
-        const response = await this.anthropic.messages.create({
+        const stream = this.anthropic.messages.stream({
           model: modelId,
           max_tokens: maxTokens,
           system: [systemBlock] as unknown as Anthropic.Messages.TextBlockParam[],
           messages,
           tools: tools.length > 0 ? tools : undefined,
         }, {
-          timeout: 5 * 60 * 1000, // 5 minute timeout per API call
+          timeout: 10 * 60 * 1000, // 10 minute timeout per API call
         });
+        const response = await stream.finalMessage();
         const apiDurationMs = Date.now() - apiStartTime;
 
         // Emit API request telemetry
