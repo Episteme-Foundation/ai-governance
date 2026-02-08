@@ -81,7 +81,7 @@ export class WikiLoader {
       }
 
       return localDir;
-    } catch (err) {
+    } catch (_err) {
       // Wiki repo may not exist yet (returns 128 for non-existent repos)
       return null;
     }

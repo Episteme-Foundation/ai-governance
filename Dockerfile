@@ -34,6 +34,9 @@ RUN npm ci --only=production --legacy-peer-deps
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy SQL migration files (tsc doesn't copy non-.ts files)
+COPY src/db/migrations ./dist/db/migrations
+
 # Copy built dashboard
 COPY --from=builder /app/dashboard/dist ./dashboard/dist
 
