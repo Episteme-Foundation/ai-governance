@@ -88,6 +88,12 @@ export class RequestRouter {
       return 'review';
     }
 
+    // PR-related comment intents (from issue_comment webhook handler)
+    // e.g., "Consider comment on PR #N" or "Respond to governance request in comment on PR #N"
+    if (intent.includes('comment on pr #') || intent.includes('comment on pr ')) {
+      return 'review';
+    }
+
     if (intent.includes('merge') ||
         intent.includes('approve') && intent.includes('pr')) {
       return 'review';
@@ -110,6 +116,13 @@ export class RequestRouter {
       return 'triage';
     }
 
+    // Issue comment intents (from issue_comment webhook handler)
+    // e.g., "Triage comment on issue #N" is already caught by 'triage' above
+    // This catches any remaining "comment on issue" patterns
+    if (intent.includes('comment on issue')) {
+      return 'triage';
+    }
+
     if (intent.includes('note ci failure') ||
         intent.includes('acknowledge')) {
       return 'review';
@@ -120,6 +133,11 @@ export class RequestRouter {
       if (intent.includes('engineer')) return 'development';
       if (intent.includes('maintainer')) return 'governance';
       if (intent.includes('reception')) return 'triage';
+    }
+
+    // Implement feature intent (from admin CLI / scheduled tasks)
+    if (intent.includes('implement_feature') || intent.includes('fix_bug')) {
+      return 'development';
     }
 
     return 'unknown';
